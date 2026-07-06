@@ -95,10 +95,12 @@ void RadarApp::beginRealRadar()
 
     AircraftModel::clearAircraft(realAircraft_, AircraftModel::kAircraftCount);
     realAircraftCount_ = 0;
+    realTrackManager_.begin();
     updateRealRadarStatus();
 
     renderer_.begin();
     wifi_.begin();
+    realApiUpdater_.begin(config_, settings_.apiRequestIntervalMs);
     renderRealRadarFrame();
 }
 
@@ -170,13 +172,15 @@ void RadarApp::updateRealRadar(uint32_t now)
 {
     wifi_.update(now, config_.wifiReconnectIntervalMs);
 
-    if (wifi_.isConnected() &&
-        (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= config_.apiRequestIntervalMs))
+    OpenSkySnapshot snapshot;
+    if (realApiUpdater_.copySnapshot(snapshot))
     {
-        lastApiRequestMs_ = now;
-        requestRealTraffic();
+        handleRealRadarSnapshot(snapshot, now);
     }
 
+    realTrackManager_.updatePrediction(settings_, now);
+    RealRadarTrackStats frameStats;
+    rebuildRealRadarAircraft(frameStats);
     updateSelectedAircraftForList(realAircraft_, realAircraftCount_, now);
 
     if (now - lastFrameMs_ < config_.frameIntervalMs)
@@ -451,21 +455,36 @@ void RadarApp::updateRealRadarStatus()
         return;
     }
 
-    if (openSky_.httpStatusCode() == 429)
+    if (realApiUpdater_.isUpdating())
+    {
+        snprintf(realRadarStatus_, sizeof(realRadarStatus_), "UPDATING");
+        return;
+    }
+
+    if (realApiUpdater_.lastHttpStatus() == 429)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "HTTP 429");
         return;
     }
 
-    if (openSky_.httpStatusCode() != 0 && openSky_.httpStatusCode() != 200)
+    if (realApiUpdater_.lastHttpStatus() != 0 && realApiUpdater_.lastHttpStatus() != 200)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "API ERROR");
         return;
     }
 
-    if (openSky_.httpStatusCode() == 0)
+    if (realApiUpdater_.lastHttpStatus() == 0)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "NO DATA");
+        return;
+    }
+
+    const uint32_t ageSec = realApiUpdater_.lastSuccessMs() > 0 ?
+                            (millis() - realApiUpdater_.lastSuccessMs()) / 1000 :
+                            0;
+    if (ageSec > 300)
+    {
+        snprintf(realRadarStatus_, sizeof(realRadarStatus_), "DATA STALE");
         return;
     }
 
@@ -475,9 +494,6 @@ void RadarApp::updateRealRadarStatus()
         return;
     }
 
-    const uint32_t ageSec = openSky_.lastSuccessMs() > 0 ?
-                            (millis() - openSky_.lastSuccessMs()) / 1000 :
-                            0;
     snprintf(realRadarStatus_, sizeof(realRadarStatus_), "LIVE N=%u %lus", realAircraftCount_, static_cast<unsigned long>(ageSec));
 }
 
@@ -525,4 +541,54 @@ void RadarApp::printApiTestSerialStatus()
                          aircraft[i].speedMs,
                          aircraft[i].headingDeg);
     }
+}
+
+void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t now)
+{
+    DebugLog::println("received new API snapshot");
+    DebugLog::printf("  HTTP=%d duration=%lu ms payload=%lu aircraft=%u status=%s\r\n",
+                     snapshot.httpStatusCode,
+                     static_cast<unsigned long>(snapshot.durationMs),
+                     static_cast<unsigned long>(snapshot.payloadLength),
+                     snapshot.aircraftCount,
+                     snapshot.lastError);
+
+    if (snapshot.requestOk || snapshot.httpStatusCode == 200)
+    {
+        RealRadarTrackStats stats;
+        realTrackManager_.mergeSnapshot(snapshot, settings_, now, stats);
+        realTrackManager_.updatePrediction(settings_, now);
+        rebuildRealRadarAircraft(stats);
+        printRealRadarTrackSummary(snapshot, stats);
+    }
+    else
+    {
+        DebugLog::println("  API snapshot failed, keeping current tracks.");
+    }
+
+    updateRealRadarStatus();
+}
+
+void RadarApp::rebuildRealRadarAircraft(RealRadarTrackStats &stats)
+{
+    realAircraftCount_ = realTrackManager_.buildAircraft(settings_,
+                                                         realAircraft_,
+                                                         AircraftModel::kAircraftCount,
+                                                         stats);
+}
+
+void RadarApp::printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const RealRadarTrackStats &stats)
+{
+    DebugLog::println("RealRadar track summary:");
+    DebugLog::printf("  raw=%u valid_pos=%u\r\n", snapshot.rawStateCount, snapshot.validPositionCount);
+    DebugLog::printf("  matched tracks=%u\r\n", stats.matchedTracks);
+    DebugLog::printf("  new tracks=%u\r\n", stats.newTracks);
+    DebugLog::printf("  stale tracks=%u\r\n", stats.staleTracks);
+    DebugLog::printf("  active tracks=%u\r\n", stats.activeTracks);
+    DebugLog::printf("  filtered_ground=%u filtered_altitude=%u filtered_speed=%u filtered_range=%u\r\n",
+                     stats.filteredGround,
+                     stats.filteredAltitude,
+                     stats.filteredSpeed,
+                     stats.filteredRange);
+    DebugLog::printf("  rendered aircraft count=%u\r\n", stats.renderedAircraftCount);
 }

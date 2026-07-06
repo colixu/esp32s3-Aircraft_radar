@@ -25,6 +25,8 @@ bool SettingsStore::load(UserSettings &settings)
     DebugLog::printf("  minAirborneAltitudeM=%.0f\r\n", settings.minAirborneAltitudeM);
     DebugLog::printf("  minAirborneSpeedMs=%.1f\r\n", settings.minAirborneSpeedMs);
     DebugLog::printf("  apiRequestIntervalMs=%lu\r\n", static_cast<unsigned long>(settings.apiRequestIntervalMs));
+    DebugLog::printf("  predictionCorrectionAlpha=%.2f\r\n", settings.predictionCorrectionAlpha);
+    DebugLog::printf("  staleTimeoutMs=%lu\r\n", static_cast<unsigned long>(settings.staleTimeoutMs));
     return true;
 }
 

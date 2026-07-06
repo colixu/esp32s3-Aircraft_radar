@@ -21,6 +21,11 @@ struct UserSettings
     float minAirborneAltitudeM;
     float minAirborneSpeedMs;
     uint32_t apiRequestIntervalMs;
+    float predictionCorrectionAlpha;
+    float predictionResetDistanceKm;
+    uint32_t predictionMaxDeltaMs;
+    uint32_t staleGraceMs;
+    uint32_t staleTimeoutMs;
     int uiButtonPin;
 
     char wifiSsid[32];

@@ -6,7 +6,9 @@
 #include "AppConfig.h"
 #include "../aircraft/AircraftModel.h"
 #include "../data/FakeDataProvider.h"
+#include "../data/OpenSkyAsyncUpdater.h"
 #include "../data/OpenSkyProvider.h"
+#include "../data/RealRadarTrackManager.h"
 #include "../ui/ApiTestView.h"
 #include "../ui/RadarRenderer.h"
 #include "InputManager.h"
@@ -32,6 +34,8 @@ private:
     RadarRenderer renderer_;
     WifiManagerSimple wifi_;
     OpenSkyProvider openSky_;
+    OpenSkyAsyncUpdater realApiUpdater_;
+    RealRadarTrackManager realTrackManager_;
     ApiTestView apiTestView_;
     Aircraft realAircraft_[AircraftModel::kAircraftCount];
     float realAircraftLat_[AircraftModel::kAircraftCount];
@@ -71,6 +75,9 @@ private:
     void renderRealRadarFrame();
     void renderApiTestScreen();
     void printApiTestSerialStatus();
+    void handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t now);
+    void rebuildRealRadarAircraft(RealRadarTrackStats &stats);
+    void printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const RealRadarTrackStats &stats);
     void requestRealTraffic();
     void convertApiAircraftToRadar();
     void addRealAircraftSorted(const ApiAircraft &source,
