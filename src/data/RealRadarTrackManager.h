@@ -24,6 +24,14 @@ struct TrackedAircraft
     float displaySpeedMs = 0.0f;
     float displayHeadingDeg = 0.0f;
 
+    bool correctionActive = false;
+    uint32_t correctionStartMs = 0;
+    uint32_t correctionDurationMs = 0;
+    float correctionStartLat = 0.0f;
+    float correctionStartLon = 0.0f;
+    float correctionStartAltitudeM = 0.0f;
+    float correctionStartHeadingDeg = 0.0f;
+
     uint32_t lastApiUpdateMs = 0;
     uint32_t lastSeenMs = 0;
     uint32_t lastPredictMs = 0;
@@ -42,6 +50,7 @@ struct RealRadarTrackStats
     uint16_t filteredRange = 0;
     uint8_t matchedTracks = 0;
     uint8_t newTracks = 0;
+    uint8_t correctionStartedCount = 0;
     uint8_t jumpResetCount = 0;
     uint8_t staleTracks = 0;
     uint8_t activeTracks = 0;
@@ -70,11 +79,11 @@ private:
 
     int8_t findTrackByIcao24(const char *icao24) const;
     int8_t findFreeTrack() const;
-    bool updateTrackFromApi(TrackedAircraft &track,
-                            const ApiAircraft &source,
-                            const UserSettings &settings,
-                            uint32_t now,
-                            bool isNewTrack);
+    uint8_t updateTrackFromApi(TrackedAircraft &track,
+                               const ApiAircraft &source,
+                               const UserSettings &settings,
+                               uint32_t now,
+                               bool isNewTrack);
     void pruneStaleTracks(const UserSettings &settings, uint32_t now);
     void addAircraftSorted(Aircraft *aircraft,
                            uint8_t aircraftCapacity,

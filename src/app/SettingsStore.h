@@ -3,6 +3,14 @@
 #include "AppConfig.h"
 #include "UserSettings.h"
 
+#ifndef ENABLE_NVS_SETTINGS
+#define ENABLE_NVS_SETTINGS 0
+#endif
+
+#if ENABLE_NVS_SETTINGS
+#include <Preferences.h>
+#endif
+
 class SettingsStore
 {
 public:
@@ -15,4 +23,9 @@ public:
 
 private:
     const AppConfig &config_;
+    bool nvsReady_ = false;
+
+#if ENABLE_NVS_SETTINGS
+    Preferences preferences_;
+#endif
 };

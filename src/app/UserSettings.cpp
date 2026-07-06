@@ -123,6 +123,10 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.prediction.jumpResetDistanceKm = 20.0f;
     settings.prediction.lowSpeedThresholdMs = 20.0f;
     settings.prediction.staleTimeoutMs = 120000;
+    settings.prediction.correctionEnabled = true;
+    settings.prediction.correctionMinApiIntervalMs = 30000;
+    settings.prediction.correctionDurationMs = 6000;
+    settings.prediction.correctionStartDistanceKm = 0.5f;
 
     settings.system.uiButtonPin = -1;
     settings.system.serialDebug = true;
@@ -191,6 +195,9 @@ void sanitizeUserSettings(UserSettings &settings)
     settings.prediction.jumpResetDistanceKm = max(0.1f, settings.prediction.jumpResetDistanceKm);
     settings.prediction.lowSpeedThresholdMs = max(0.0f, settings.prediction.lowSpeedThresholdMs);
     settings.prediction.staleTimeoutMs = max<uint32_t>(settings.prediction.staleTimeoutMs, 10000);
+    settings.prediction.correctionMinApiIntervalMs = max<uint32_t>(settings.prediction.correctionMinApiIntervalMs, 0);
+    settings.prediction.correctionDurationMs = max<uint32_t>(settings.prediction.correctionDurationMs, 1000);
+    settings.prediction.correctionStartDistanceKm = max(0.1f, settings.prediction.correctionStartDistanceKm);
 
     settings.schedule.startMinutesOfDay = clampValue<int16_t>(settings.schedule.startMinutesOfDay, 0, 1439);
     settings.schedule.endMinutesOfDay = clampValue<int16_t>(settings.schedule.endMinutesOfDay, 0, 1439);
@@ -302,6 +309,11 @@ void printUserSettings(const UserSettings &settings)
                      settings.prediction.jumpResetDistanceKm,
                      settings.prediction.lowSpeedThresholdMs,
                      static_cast<unsigned long>(settings.prediction.staleTimeoutMs));
+    DebugLog::printf("  correction=%u minApi=%lums duration=%lums start=%.1fkm\r\n",
+                     settings.prediction.correctionEnabled ? 1 : 0,
+                     static_cast<unsigned long>(settings.prediction.correctionMinApiIntervalMs),
+                     static_cast<unsigned long>(settings.prediction.correctionDurationMs),
+                     settings.prediction.correctionStartDistanceKm);
     DebugLog::println("[System]");
     DebugLog::printf("  uiButtonPin=%d serialDebug=%u\r\n",
                      settings.system.uiButtonPin,

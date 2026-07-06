@@ -35,6 +35,14 @@ void InputManager::update()
         {
             resetDefaultsPressed_ = true;
         }
+        else if (command == 's' || command == 'S')
+        {
+            saveSettingsPressed_ = true;
+        }
+        else if (command == 'l' || command == 'L')
+        {
+            loadSettingsPressed_ = true;
+        }
     }
 
     // Hardware button support is intentionally reserved for a later pass.
@@ -72,5 +80,19 @@ bool InputManager::wasResetDefaultsPressed()
 {
     const bool pressed = resetDefaultsPressed_;
     resetDefaultsPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasSaveSettingsPressed()
+{
+    const bool pressed = saveSettingsPressed_;
+    saveSettingsPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasLoadSettingsPressed()
+{
+    const bool pressed = loadSettingsPressed_;
+    loadSettingsPressed_ = false;
     return pressed;
 }

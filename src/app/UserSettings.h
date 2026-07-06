@@ -112,6 +112,10 @@ struct PredictionSettings
     float jumpResetDistanceKm;
     float lowSpeedThresholdMs;
     uint32_t staleTimeoutMs;
+    bool correctionEnabled;
+    uint32_t correctionMinApiIntervalMs;
+    uint32_t correctionDurationMs;
+    float correctionStartDistanceKm;
 };
 
 struct SystemSettings

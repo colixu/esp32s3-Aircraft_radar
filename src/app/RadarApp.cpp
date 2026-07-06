@@ -128,6 +128,21 @@ void RadarApp::updateInput()
     {
         resetSettingsToDefault();
     }
+    if (inputManager_.wasSaveSettingsPressed())
+    {
+        DebugLog::println("Manual settings save requested.");
+        settingsStore_.save(settings_);
+    }
+    if (inputManager_.wasLoadSettingsPressed())
+    {
+        DebugLog::println("Manual settings load requested.");
+        settingsStore_.load(settings_);
+        inputManager_.begin(settings_.system.uiButtonPin);
+        if (config_.appMode == AppMode::RealRadar)
+        {
+            renderRealRadarFrame();
+        }
+    }
 }
 
 void RadarApp::switchUiTheme()
@@ -459,6 +474,7 @@ void RadarApp::printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const
     DebugLog::printf("  raw=%u valid_pos=%u\r\n", snapshot.rawStateCount, snapshot.validPositionCount);
     DebugLog::printf("  matched tracks=%u\r\n", stats.matchedTracks);
     DebugLog::printf("  new tracks=%u\r\n", stats.newTracks);
+    DebugLog::printf("  corrections started=%u\r\n", stats.correctionStartedCount);
     DebugLog::printf("  jump resets=%u\r\n", stats.jumpResetCount);
     DebugLog::printf("  stale tracks=%u\r\n", stats.staleTracks);
     DebugLog::printf("  active tracks=%u\r\n", stats.activeTracks);

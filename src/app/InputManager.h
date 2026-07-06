@@ -12,6 +12,8 @@ public:
     bool wasGroundTogglePressed();
     bool wasPrintSettingsPressed();
     bool wasResetDefaultsPressed();
+    bool wasSaveSettingsPressed();
+    bool wasLoadSettingsPressed();
 
 private:
     int buttonPin_ = -1;
@@ -20,4 +22,6 @@ private:
     bool groundTogglePressed_ = false;
     bool printSettingsPressed_ = false;
     bool resetDefaultsPressed_ = false;
+    bool saveSettingsPressed_ = false;
+    bool loadSettingsPressed_ = false;
 };
