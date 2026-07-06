@@ -12,9 +12,11 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.minAirborneAltitudeM = config.minAirborneAltitudeM;
     settings.minAirborneSpeedMs = config.minAirborneSpeedMs;
     settings.apiRequestIntervalMs = config.apiRequestIntervalMs;
-    settings.predictionCorrectionAlpha = 0.05f;
-    settings.predictionResetDistanceKm = 20.0f;
-    settings.predictionMaxDeltaMs = 2000;
+    settings.predictionEnabled = true;
+    settings.predictionFollowAlpha = 0.15f;
+    settings.predictionMaxMs = 120000;
+    settings.jumpResetDistanceKm = 20.0f;
+    settings.lowSpeedPredictionThresholdMs = 20.0f;
     settings.staleGraceMs = 90000;
     settings.staleTimeoutMs = 120000;
     settings.uiButtonPin = -1;

@@ -59,6 +59,7 @@ private:
     uint32_t lastApiRequestMs_ = 0;
     uint32_t lastApiScreenMs_ = 0;
     uint32_t lastApiSerialMs_ = 0;
+    uint32_t lastPredictionSummaryMs_ = 0;
 
     void beginRadarDemo();
     void beginApiTest();

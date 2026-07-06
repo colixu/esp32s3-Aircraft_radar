@@ -42,6 +42,7 @@ struct RealRadarTrackStats
     uint16_t filteredRange = 0;
     uint8_t matchedTracks = 0;
     uint8_t newTracks = 0;
+    uint8_t jumpResetCount = 0;
     uint8_t staleTracks = 0;
     uint8_t activeTracks = 0;
     uint8_t renderedAircraftCount = 0;
@@ -58,6 +59,7 @@ public:
                        uint32_t now,
                        RealRadarTrackStats &stats);
     void updatePrediction(const UserSettings &settings, uint32_t now);
+    void printPredictionSummary(const UserSettings &settings, uint32_t now) const;
     uint8_t buildAircraft(const UserSettings &settings,
                           Aircraft *aircraft,
                           uint8_t aircraftCapacity,
@@ -68,7 +70,7 @@ private:
 
     int8_t findTrackByIcao24(const char *icao24) const;
     int8_t findFreeTrack() const;
-    void updateTrackFromApi(TrackedAircraft &track,
+    bool updateTrackFromApi(TrackedAircraft &track,
                             const ApiAircraft &source,
                             const UserSettings &settings,
                             uint32_t now,

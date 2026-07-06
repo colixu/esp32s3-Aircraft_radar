@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "../aircraft/AircraftModel.h"
+#include "../app/DebugLog.h"
 #include "../utils/GeoPredict.h"
 #include "../utils/GeoUtils.h"
 
@@ -48,7 +49,10 @@ void RealRadarTrackManager::mergeSnapshot(const OpenSkySnapshot &snapshot,
         int8_t index = findTrackByIcao24(source.icao24);
         if (index >= 0)
         {
-            updateTrackFromApi(tracks_[index], source, settings, now, false);
+            if (updateTrackFromApi(tracks_[index], source, settings, now, false))
+            {
+                ++stats.jumpResetCount;
+            }
             ++stats.matchedTracks;
             continue;
         }
@@ -95,46 +99,111 @@ void RealRadarTrackManager::updatePrediction(const UserSettings &settings, uint3
             continue;
         }
 
-        if (track.lastPredictMs == 0)
+        if (track.lastApiUpdateMs == 0)
         {
-            track.lastPredictMs = now;
             continue;
         }
 
-        uint32_t deltaMs = now - track.lastPredictMs;
-        if (deltaMs > settings.predictionMaxDeltaMs)
+        uint32_t elapsedSinceApiMs = now - track.lastApiUpdateMs;
+        if (elapsedSinceApiMs > settings.predictionMaxMs)
         {
-            deltaMs = settings.predictionMaxDeltaMs;
+            elapsedSinceApiMs = settings.predictionMaxMs;
+            track.stale = true;
         }
-        track.lastPredictMs = now;
 
-        float predictedLat = track.displayLat;
-        float predictedLon = track.displayLon;
-        if (!track.onGround && track.displaySpeedMs > settings.minAirborneSpeedMs * 0.25f)
+        float predictedLat = track.apiLat;
+        float predictedLon = track.apiLon;
+        const bool canPredict = settings.predictionEnabled &&
+                                !track.onGround &&
+                                track.apiSpeedMs >= settings.lowSpeedPredictionThresholdMs;
+
+        if (canPredict)
         {
-            GeoPredict::predictLatLon(track.displayLat,
-                                      track.displayLon,
-                                      track.displaySpeedMs,
-                                      track.displayHeadingDeg,
-                                      static_cast<float>(deltaMs) / 1000.0f,
+            GeoPredict::predictLatLon(track.apiLat,
+                                      track.apiLon,
+                                      track.apiSpeedMs,
+                                      track.apiHeadingDeg,
+                                      static_cast<float>(elapsedSinceApiMs) / 1000.0f,
                                       predictedLat,
                                       predictedLon);
         }
 
-        track.displayLat = predictedLat;
-        track.displayLon = predictedLon;
+        track.displayLat += (predictedLat - track.displayLat) * settings.predictionFollowAlpha;
+        track.displayLon += (predictedLon - track.displayLon) * settings.predictionFollowAlpha;
+        track.displayAltitudeM += (track.apiAltitudeM - track.displayAltitudeM) * settings.predictionFollowAlpha;
+        track.displaySpeedMs += (track.apiSpeedMs - track.displaySpeedMs) * settings.predictionFollowAlpha;
+        track.displayHeadingDeg = smoothAngle(track.displayHeadingDeg,
+                                              track.apiHeadingDeg,
+                                              settings.predictionFollowAlpha);
+        track.lastPredictMs = now;
+    }
+}
 
-        if (!track.stale)
+void RealRadarTrackManager::printPredictionSummary(const UserSettings &settings, uint32_t now) const
+{
+    uint8_t activeCount = 0;
+    uint8_t staleCount = 0;
+    const TrackedAircraft *firstTrack = nullptr;
+
+    for (uint8_t i = 0; i < kMaxTracks; ++i)
+    {
+        const TrackedAircraft &track = tracks_[i];
+        if (!track.valid)
         {
-            track.displayLat += (track.apiLat - track.displayLat) * settings.predictionCorrectionAlpha;
-            track.displayLon += (track.apiLon - track.displayLon) * settings.predictionCorrectionAlpha;
-            track.displayAltitudeM += (track.apiAltitudeM - track.displayAltitudeM) * settings.predictionCorrectionAlpha;
-            track.displaySpeedMs += (track.apiSpeedMs - track.displaySpeedMs) * settings.predictionCorrectionAlpha;
-            track.displayHeadingDeg = smoothAngle(track.displayHeadingDeg,
-                                                  track.apiHeadingDeg,
-                                                  settings.predictionCorrectionAlpha);
+            continue;
+        }
+
+        if (track.stale)
+        {
+            ++staleCount;
+        }
+        else
+        {
+            ++activeCount;
+        }
+
+        if (firstTrack == nullptr)
+        {
+            firstTrack = &track;
         }
     }
+
+    DebugLog::println("Prediction summary:");
+    DebugLog::printf("  active=%u stale=%u prediction=%u\r\n",
+                     activeCount,
+                     staleCount,
+                     settings.predictionEnabled ? 1 : 0);
+
+    if (firstTrack == nullptr)
+    {
+        DebugLog::println("  no tracks");
+        return;
+    }
+
+    float apiDistanceKm = 0.0f;
+    float apiBearingDeg = 0.0f;
+    float displayDistanceKm = 0.0f;
+    float displayBearingDeg = 0.0f;
+    GeoUtils::geoToRadar(settings.radarCenterLat,
+                         settings.radarCenterLon,
+                         firstTrack->apiLat,
+                         firstTrack->apiLon,
+                         apiDistanceKm,
+                         apiBearingDeg);
+    GeoUtils::geoToRadar(settings.radarCenterLat,
+                         settings.radarCenterLon,
+                         firstTrack->displayLat,
+                         firstTrack->displayLon,
+                         displayDistanceKm,
+                         displayBearingDeg);
+
+    DebugLog::printf("  first=%s api=%.1fkm/%.0f display=%.1fkm/%.0f elapsed=%lus\r\n",
+                     firstTrack->callsign[0] != '\0' ? firstTrack->callsign : firstTrack->icao24,
+                     apiDistanceKm,
+                     apiBearingDeg,
+                     displayDistanceKm,
+                     displayBearingDeg,
+                     static_cast<unsigned long>((now - firstTrack->lastApiUpdateMs) / 1000));
 }
 
 uint8_t RealRadarTrackManager::buildAircraft(const UserSettings &settings,
@@ -223,7 +292,7 @@ int8_t RealRadarTrackManager::findFreeTrack() const
     return -1;
 }
 
-void RealRadarTrackManager::updateTrackFromApi(TrackedAircraft &track,
+bool RealRadarTrackManager::updateTrackFromApi(TrackedAircraft &track,
                                                const ApiAircraft &source,
                                                const UserSettings &settings,
                                                uint32_t now,
@@ -254,7 +323,7 @@ void RealRadarTrackManager::updateTrackFromApi(TrackedAircraft &track,
         track.displaySpeedMs = source.speedMs;
         track.displayHeadingDeg = source.headingDeg;
         track.lastPredictMs = now;
-        return;
+        return false;
     }
 
     float snapDistanceKm = 0.0f;
@@ -265,7 +334,7 @@ void RealRadarTrackManager::updateTrackFromApi(TrackedAircraft &track,
                              source.lon,
                              snapDistanceKm,
                              ignoredBearingDeg) &&
-        snapDistanceKm > settings.predictionResetDistanceKm)
+        snapDistanceKm > settings.jumpResetDistanceKm)
     {
         track.displayLat = source.lat;
         track.displayLon = source.lon;
@@ -273,7 +342,13 @@ void RealRadarTrackManager::updateTrackFromApi(TrackedAircraft &track,
         track.displaySpeedMs = source.speedMs;
         track.displayHeadingDeg = source.headingDeg;
         track.lastPredictMs = now;
+        DebugLog::printf("  jump reset %s distance=%.1fkm\r\n",
+                         track.callsign[0] != '\0' ? track.callsign : track.icao24,
+                         snapDistanceKm);
+        return true;
     }
+
+    return false;
 }
 
 void RealRadarTrackManager::pruneStaleTracks(const UserSettings &settings, uint32_t now)

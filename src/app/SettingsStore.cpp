@@ -25,7 +25,10 @@ bool SettingsStore::load(UserSettings &settings)
     DebugLog::printf("  minAirborneAltitudeM=%.0f\r\n", settings.minAirborneAltitudeM);
     DebugLog::printf("  minAirborneSpeedMs=%.1f\r\n", settings.minAirborneSpeedMs);
     DebugLog::printf("  apiRequestIntervalMs=%lu\r\n", static_cast<unsigned long>(settings.apiRequestIntervalMs));
-    DebugLog::printf("  predictionCorrectionAlpha=%.2f\r\n", settings.predictionCorrectionAlpha);
+    DebugLog::printf("  predictionEnabled=%u\r\n", settings.predictionEnabled ? 1 : 0);
+    DebugLog::printf("  predictionFollowAlpha=%.2f\r\n", settings.predictionFollowAlpha);
+    DebugLog::printf("  predictionMaxMs=%lu\r\n", static_cast<unsigned long>(settings.predictionMaxMs));
+    DebugLog::printf("  jumpResetDistanceKm=%.1f\r\n", settings.jumpResetDistanceKm);
     DebugLog::printf("  staleTimeoutMs=%lu\r\n", static_cast<unsigned long>(settings.staleTimeoutMs));
     return true;
 }

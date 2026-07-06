@@ -181,6 +181,11 @@ void RadarApp::updateRealRadar(uint32_t now)
     realTrackManager_.updatePrediction(settings_, now);
     RealRadarTrackStats frameStats;
     rebuildRealRadarAircraft(frameStats);
+    if (now - lastPredictionSummaryMs_ >= 10000)
+    {
+        lastPredictionSummaryMs_ = now;
+        realTrackManager_.printPredictionSummary(settings_, now);
+    }
     updateSelectedAircraftForList(realAircraft_, realAircraftCount_, now);
 
     if (now - lastFrameMs_ < config_.frameIntervalMs)
@@ -583,6 +588,7 @@ void RadarApp::printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const
     DebugLog::printf("  raw=%u valid_pos=%u\r\n", snapshot.rawStateCount, snapshot.validPositionCount);
     DebugLog::printf("  matched tracks=%u\r\n", stats.matchedTracks);
     DebugLog::printf("  new tracks=%u\r\n", stats.newTracks);
+    DebugLog::printf("  jump resets=%u\r\n", stats.jumpResetCount);
     DebugLog::printf("  stale tracks=%u\r\n", stats.staleTracks);
     DebugLog::printf("  active tracks=%u\r\n", stats.activeTracks);
     DebugLog::printf("  filtered_ground=%u filtered_altitude=%u filtered_speed=%u filtered_range=%u\r\n",
