@@ -24,6 +24,39 @@ namespace AircraftModel
         return delta > 180.0f ? 360.0f - delta : delta;
     }
 
+    void clearAircraft(Aircraft *aircraft, uint8_t aircraftCount)
+    {
+        for (uint8_t i = 0; i < aircraftCount; ++i)
+        {
+            memset(&aircraft[i], 0, sizeof(aircraft[i]));
+        }
+    }
+
+    uint8_t countValid(const Aircraft *aircraft, uint8_t aircraftCount)
+    {
+        uint8_t validCount = 0;
+        for (uint8_t i = 0; i < aircraftCount; ++i)
+        {
+            if (aircraft[i].valid)
+            {
+                ++validCount;
+            }
+        }
+        return validCount;
+    }
+
+    int8_t firstValidIndex(const Aircraft *aircraft, uint8_t aircraftCount)
+    {
+        for (uint8_t i = 0; i < aircraftCount; ++i)
+        {
+            if (aircraft[i].valid)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     void setAircraft(Aircraft &aircraft,
                      const char *callsign,
                      float distanceKm,

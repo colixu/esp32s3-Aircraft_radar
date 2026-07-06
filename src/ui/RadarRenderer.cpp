@@ -2,6 +2,8 @@
 
 #include <math.h>
 
+#include "../app/DebugLog.h"
+
 RadarRenderer::RadarRenderer(TFT_eSPI &display) :
     tft_(display),
     frame_(&display)
@@ -23,7 +25,8 @@ bool RadarRenderer::isReady() const
 void RadarRenderer::renderRadarFrame(const Aircraft *aircraft,
                                      uint8_t aircraftCount,
                                      uint8_t selectedAircraftIndex,
-                                     const AppConfig &config)
+                                     const AppConfig &config,
+                                     const char *statusText)
 {
     if (!frameBufferReady_)
     {
@@ -33,6 +36,7 @@ void RadarRenderer::renderRadarFrame(const Aircraft *aircraft,
     drawRadarBackground(frame_);
     drawScanSweep(frame_);
     drawAircraftTargets(frame_, aircraft, aircraftCount, selectedAircraftIndex, config);
+    drawStatusText(frame_, statusText);
     frame_.pushSprite(0, 0);
 }
 
@@ -46,26 +50,26 @@ void RadarRenderer::printDisplaySetup()
     setup_t setup;
     tft_.getSetup(setup);
 
-    Serial.println("TFT_eSPI compiled setup:");
-    Serial.printf("  driver: 0x%04X\r\n", setup.tft_driver);
-    Serial.printf("  size: %dx%d\r\n", setup.tft_width, setup.tft_height);
-    Serial.printf("  MOSI=%d MISO=%d SCLK=%d\r\n",
-                  setup.pin_tft_mosi,
-                  setup.pin_tft_miso,
-                  setup.pin_tft_clk);
-    Serial.printf("  CS=%d DC=%d RST=%d\r\n",
-                  setup.pin_tft_cs,
-                  setup.pin_tft_dc,
-                  setup.pin_tft_rst);
-    Serial.printf("  SPI frequency: %lu Hz\r\n",
-                  static_cast<unsigned long>(setup.tft_spi_freq) * 100000UL);
+    DebugLog::println("TFT_eSPI compiled setup:");
+    DebugLog::printf("  driver: 0x%04X\r\n", setup.tft_driver);
+    DebugLog::printf("  size: %dx%d\r\n", setup.tft_width, setup.tft_height);
+    DebugLog::printf("  MOSI=%d MISO=%d SCLK=%d\r\n",
+                     setup.pin_tft_mosi,
+                     setup.pin_tft_miso,
+                     setup.pin_tft_clk);
+    DebugLog::printf("  CS=%d DC=%d RST=%d\r\n",
+                     setup.pin_tft_cs,
+                     setup.pin_tft_dc,
+                     setup.pin_tft_rst);
+    DebugLog::printf("  SPI frequency: %lu Hz\r\n",
+                     static_cast<unsigned long>(setup.tft_spi_freq) * 100000UL);
 }
 
 void RadarRenderer::initDisplay()
 {
     printDisplaySetup();
 
-    Serial.println("Initializing GC9A01 TFT...");
+    DebugLog::println("Initializing GC9A01 TFT...");
     tft_.init();
     tft_.setRotation(0);
     // This GC9A01 panel needs inversion enabled: otherwise black appears white
@@ -73,23 +77,23 @@ void RadarRenderer::initDisplay()
     tft_.invertDisplay(true);
     tft_.fillScreen(TFT_BLACK);
 
-    Serial.println("GC9A01 init complete.");
+    DebugLog::println("GC9A01 init complete.");
 }
 
 void RadarRenderer::initFrameBuffer()
 {
-    Serial.println("Creating 240x240 16-bit sprite frame buffer...");
+    DebugLog::println("Creating 240x240 16-bit sprite frame buffer...");
     frame_.setColorDepth(16);
     void *buffer = frame_.createSprite(240, 240);
 
     if (buffer != nullptr)
     {
         frameBufferReady_ = true;
-        Serial.println("16-bit sprite frame buffer ready.");
+        DebugLog::println("16-bit sprite frame buffer ready.");
         return;
     }
 
-    Serial.println("16-bit sprite allocation failed, trying 8-bit sprite...");
+    DebugLog::println("16-bit sprite allocation failed, trying 8-bit sprite...");
     frame_.deleteSprite();
     frame_.setColorDepth(8);
     buffer = frame_.createSprite(240, 240);
@@ -97,12 +101,12 @@ void RadarRenderer::initFrameBuffer()
     if (buffer != nullptr)
     {
         frameBufferReady_ = true;
-        Serial.println("8-bit sprite frame buffer ready.");
+        DebugLog::println("8-bit sprite frame buffer ready.");
         return;
     }
 
     frameBufferReady_ = false;
-    Serial.println("ERROR: sprite frame buffer allocation failed.");
+    DebugLog::println("ERROR: sprite frame buffer allocation failed.");
 }
 
 void RadarRenderer::initColors()
@@ -209,7 +213,18 @@ void RadarRenderer::drawMinimalAircraftLabel(TFT_eSprite &canvas,
 {
     const bool placeLeft = x > kCenterX;
     int16_t labelX = placeLeft ? x - 10 : x + 10;
-    int16_t labelY = constrain(y - 8, 20, 214);
+    int16_t labelY = y - 8;
+
+    if (y < 34)
+    {
+        labelY = y + 12;
+    }
+    else if (y > 202)
+    {
+        labelY = y - 24;
+    }
+
+    labelY = constrain(labelY, 22, 206);
 
     if (placeLeft)
     {
@@ -274,4 +289,16 @@ void RadarRenderer::drawAircraftTargets(TFT_eSprite &canvas,
                            config.maxRangeKm,
                            config.showLabels);
     }
+}
+
+void RadarRenderer::drawStatusText(TFT_eSprite &canvas, const char *statusText)
+{
+    if (statusText == nullptr || statusText[0] == '\0')
+    {
+        return;
+    }
+
+    canvas.setTextDatum(BC_DATUM);
+    canvas.setTextColor(labelGreen_, TFT_BLACK);
+    canvas.drawString(statusText, kCenterX, 226, 1);
 }

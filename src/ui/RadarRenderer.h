@@ -15,7 +15,8 @@ public:
     void renderRadarFrame(const Aircraft *aircraft,
                           uint8_t aircraftCount,
                           uint8_t selectedAircraftIndex,
-                          const AppConfig &config);
+                          const AppConfig &config,
+                          const char *statusText = nullptr);
     void advanceSweep(float stepDeg);
 
 private:
@@ -72,4 +73,5 @@ private:
                              uint8_t aircraftCount,
                              uint8_t selectedAircraftIndex,
                              const AppConfig &config);
+    void drawStatusText(TFT_eSprite &canvas, const char *statusText);
 };
