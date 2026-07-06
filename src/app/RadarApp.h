@@ -38,19 +38,8 @@ private:
     RealRadarTrackManager realTrackManager_;
     ApiTestView apiTestView_;
     Aircraft realAircraft_[AircraftModel::kAircraftCount];
-    float realAircraftLat_[AircraftModel::kAircraftCount];
-    float realAircraftLon_[AircraftModel::kAircraftCount];
-    bool realAircraftOnGround_[AircraftModel::kAircraftCount];
     uint8_t realAircraftCount_ = 0;
     char realRadarStatus_[32] = "LIVE WAIT";
-
-    struct RealRadarFilterStats
-    {
-        uint16_t filteredGround = 0;
-        uint16_t filteredAltitude = 0;
-        uint16_t filteredSpeed = 0;
-        uint16_t filteredRange = 0;
-    };
 
     uint8_t selectedAircraftIndex_ = 0;
     uint32_t lastFrameMs_ = 0;
@@ -66,6 +55,9 @@ private:
     void beginRealRadar();
     void updateInput();
     void switchUiTheme();
+    void switchRange();
+    void toggleGroundTraffic();
+    void resetSettingsToDefault();
     void updateRadarDemo(uint32_t now);
     void updateApiTest(uint32_t now);
     void updateRealRadar(uint32_t now);
@@ -79,12 +71,6 @@ private:
     void handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t now);
     void rebuildRealRadarAircraft(RealRadarTrackStats &stats);
     void printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const RealRadarTrackStats &stats);
-    void requestRealTraffic();
-    void convertApiAircraftToRadar();
-    void addRealAircraftSorted(const ApiAircraft &source,
-                               const char *displayName,
-                               float distanceKm,
-                               float bearingDeg);
-    void printRealRadarFilterSummary(const RealRadarFilterStats &stats);
     void updateRealRadarStatus();
+    AppConfig runtimeRenderConfig() const;
 };

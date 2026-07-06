@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "../app/AppConfig.h"
+#include "../app/UserSettings.h"
 #include "OpenSkyProvider.h"
 
 struct OpenSkySnapshot
@@ -23,7 +24,7 @@ struct OpenSkySnapshot
 class OpenSkyAsyncUpdater
 {
 public:
-    bool begin(const AppConfig &config, uint32_t requestIntervalMs);
+    bool begin(const AppConfig &config, const UserSettings &settings, uint32_t requestIntervalMs);
     void stop();
 
     bool copySnapshot(OpenSkySnapshot &snapshot);

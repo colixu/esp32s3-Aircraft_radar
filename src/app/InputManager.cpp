@@ -19,6 +19,22 @@ void InputManager::update()
         {
             uiSwitchPressed_ = true;
         }
+        else if (command == 'r' || command == 'R')
+        {
+            rangeSwitchPressed_ = true;
+        }
+        else if (command == 'g' || command == 'G')
+        {
+            groundTogglePressed_ = true;
+        }
+        else if (command == 'p' || command == 'P')
+        {
+            printSettingsPressed_ = true;
+        }
+        else if (command == 'd' || command == 'D')
+        {
+            resetDefaultsPressed_ = true;
+        }
     }
 
     // Hardware button support is intentionally reserved for a later pass.
@@ -28,5 +44,33 @@ bool InputManager::wasUiSwitchPressed()
 {
     const bool pressed = uiSwitchPressed_;
     uiSwitchPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasRangeSwitchPressed()
+{
+    const bool pressed = rangeSwitchPressed_;
+    rangeSwitchPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasGroundTogglePressed()
+{
+    const bool pressed = groundTogglePressed_;
+    groundTogglePressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasPrintSettingsPressed()
+{
+    const bool pressed = printSettingsPressed_;
+    printSettingsPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasResetDefaultsPressed()
+{
+    const bool pressed = resetDefaultsPressed_;
+    resetDefaultsPressed_ = false;
     return pressed;
 }

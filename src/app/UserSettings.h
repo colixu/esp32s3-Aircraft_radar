@@ -11,31 +11,138 @@ enum class UiTheme
     CyberpunkRadar
 };
 
-struct UserSettings
+enum class ApiProvider
+{
+    OpenSky,
+    AdsbFi,
+    AirplanesLive,
+    AdsbLol,
+    Custom
+};
+
+enum class ApiAccountMode
+{
+    Anonymous,
+    StandardUser,
+    ActiveFeeder,
+    CustomBudget
+};
+
+enum class RefreshPolicy
+{
+    AutoByDailyBudget,
+    ManualInterval
+};
+
+enum class DeviceState
+{
+    Boot,
+    ConnectWiFi,
+    SetupPortal,
+    Running,
+    PausedBySchedule,
+    WiFiLost,
+    ApiError
+};
+
+struct WiFiSettings
+{
+    char ssid[32];
+    char password[64];
+    bool configured;
+};
+
+struct LocationSettings
+{
+    float centerLat;
+    float centerLon;
+    float maxRangeKm;
+    float queryLatMin;
+    float queryLonMin;
+    float queryLatMax;
+    float queryLonMax;
+};
+
+struct ApiSettings
+{
+    ApiProvider provider;
+    ApiAccountMode accountMode;
+    RefreshPolicy refreshPolicy;
+
+    char openSkyUsername[64];
+    char openSkyPassword[64];
+
+    uint32_t dailyCreditBudget;
+    float creditReserveRatio;
+    float requestCostCredits;
+
+    uint32_t manualRequestIntervalMs;
+    uint32_t computedRequestIntervalMs;
+    uint32_t minUsefulIntervalMs;
+};
+
+struct ScheduleSettings
+{
+    bool enabled;
+    int16_t startMinutesOfDay;
+    int16_t endMinutesOfDay;
+    int16_t timezoneOffsetMinutes;
+};
+
+struct DisplaySettings
 {
     UiTheme uiTheme;
-    float radarCenterLat;
-    float radarCenterLon;
-    float maxRangeKm;
+    uint8_t maxAircraftToDisplay;
+    bool showLabels;
+    uint8_t brightness;
+};
+
+struct FilterSettings
+{
     bool showGroundTraffic;
     float minAirborneAltitudeM;
     float minAirborneSpeedMs;
-    uint32_t apiRequestIntervalMs;
-    bool predictionEnabled;
-    float predictionFollowAlpha;
-    uint32_t predictionMaxMs;
-    float jumpResetDistanceKm;
-    float lowSpeedPredictionThresholdMs;
-    uint32_t staleGraceMs;
-    uint32_t staleTimeoutMs;
-    int uiButtonPin;
-
-    char wifiSsid[32];
-    char wifiPassword[64];
-    char openSkyUsername[64];
-    char openSkyPassword[64];
 };
 
+struct PredictionSettings
+{
+    bool enabled;
+    float followAlpha;
+    uint32_t predictionMaxMs;
+    float jumpResetDistanceKm;
+    float lowSpeedThresholdMs;
+    uint32_t staleTimeoutMs;
+};
+
+struct SystemSettings
+{
+    int16_t uiButtonPin;
+    bool serialDebug;
+};
+
+struct UserSettings
+{
+    WiFiSettings wifi;
+    LocationSettings location;
+    ApiSettings api;
+    ScheduleSettings schedule;
+    DisplaySettings display;
+    FilterSettings filter;
+    PredictionSettings prediction;
+    SystemSettings system;
+};
+
+void loadDefaultUserSettings(UserSettings &settings);
 void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config);
+bool validateUserSettings(const UserSettings &settings);
+void sanitizeUserSettings(UserSettings &settings);
+uint32_t computeActiveSecondsPerDay(const ScheduleSettings &schedule);
+uint32_t computeRecommendedRequestIntervalMs(const UserSettings &settings);
+uint32_t activeRequestIntervalMs(const UserSettings &settings);
+void printUserSettings(const UserSettings &settings);
+
 const char *uiThemeName(UiTheme theme);
+const char *apiProviderName(ApiProvider provider);
+const char *apiAccountModeName(ApiAccountMode mode);
+const char *refreshPolicyName(RefreshPolicy policy);
 UiTheme nextUiTheme(UiTheme theme);

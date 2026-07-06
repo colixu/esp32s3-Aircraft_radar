@@ -19,7 +19,7 @@ void RadarApp::begin()
     DebugLog::println("ESP32-S3 GC9A01 aircraft radar");
     settingsStore_.begin();
     settingsStore_.load(settings_);
-    inputManager_.begin(settings_.uiButtonPin);
+    inputManager_.begin(settings_.system.uiButtonPin);
 
     if (config_.appMode == AppMode::ApiTest)
     {
@@ -80,13 +80,13 @@ void RadarApp::beginRealRadar()
 {
     DebugLog::println("Starting RealRadar mode.");
     DebugLog::printf("Radar center: lat=%.5f lon=%.5f range=%.0fkm\r\n",
-                     settings_.radarCenterLat,
-                     settings_.radarCenterLon,
-                     settings_.maxRangeKm);
+                     settings_.location.centerLat,
+                     settings_.location.centerLon,
+                     settings_.location.maxRangeKm);
     DebugLog::printf("RealRadar filters: ground=%s minAlt=%.0fm minSpeed=%.1fm/s\r\n",
-                     settings_.showGroundTraffic ? "show" : "hide",
-                     settings_.minAirborneAltitudeM,
-                     settings_.minAirborneSpeedMs);
+                     settings_.filter.showGroundTraffic ? "show" : "hide",
+                     settings_.filter.minAirborneAltitudeM,
+                     settings_.filter.minAirborneSpeedMs);
     DebugLog::printf("OpenSky bbox: lat %.4f..%.4f lon %.4f..%.4f\r\n",
                      config_.openSkyLamin,
                      config_.openSkyLamax,
@@ -100,7 +100,7 @@ void RadarApp::beginRealRadar()
 
     renderer_.begin();
     wifi_.begin();
-    realApiUpdater_.begin(config_, settings_.apiRequestIntervalMs);
+    realApiUpdater_.begin(config_, settings_, activeRequestIntervalMs(settings_));
     renderRealRadarFrame();
 }
 
@@ -112,18 +112,69 @@ void RadarApp::updateInput()
     {
         switchUiTheme();
     }
+    if (inputManager_.wasRangeSwitchPressed())
+    {
+        switchRange();
+    }
+    if (inputManager_.wasGroundTogglePressed())
+    {
+        toggleGroundTraffic();
+    }
+    if (inputManager_.wasPrintSettingsPressed())
+    {
+        printUserSettings(settings_);
+    }
+    if (inputManager_.wasResetDefaultsPressed())
+    {
+        resetSettingsToDefault();
+    }
 }
 
 void RadarApp::switchUiTheme()
 {
-    settings_.uiTheme = nextUiTheme(settings_.uiTheme);
-    DebugLog::printf("UI theme switched: %s\r\n", uiThemeName(settings_.uiTheme));
+    settings_.display.uiTheme = nextUiTheme(settings_.display.uiTheme);
+    DebugLog::printf("UI theme switched: %s\r\n", uiThemeName(settings_.display.uiTheme));
     settingsStore_.save(settings_);
 
     if (config_.appMode == AppMode::RealRadar)
     {
         renderRealRadarFrame();
     }
+}
+
+void RadarApp::switchRange()
+{
+    if (settings_.location.maxRangeKm < 45.0f)
+    {
+        settings_.location.maxRangeKm = 60.0f;
+    }
+    else if (settings_.location.maxRangeKm < 90.0f)
+    {
+        settings_.location.maxRangeKm = 120.0f;
+    }
+    else
+    {
+        settings_.location.maxRangeKm = 30.0f;
+    }
+
+    sanitizeUserSettings(settings_);
+    DebugLog::printf("Range switched: %.0fkm\r\n", settings_.location.maxRangeKm);
+    settingsStore_.save(settings_);
+}
+
+void RadarApp::toggleGroundTraffic()
+{
+    settings_.filter.showGroundTraffic = !settings_.filter.showGroundTraffic;
+    DebugLog::printf("showGroundTraffic=%u\r\n", settings_.filter.showGroundTraffic ? 1 : 0);
+    settingsStore_.save(settings_);
+}
+
+void RadarApp::resetSettingsToDefault()
+{
+    settingsStore_.resetToDefault(settings_);
+    DebugLog::println("User settings reset to default.");
+    printUserSettings(settings_);
+    settingsStore_.save(settings_);
 }
 
 void RadarApp::updateRadarDemo(uint32_t now)
@@ -146,7 +197,7 @@ void RadarApp::updateApiTest(uint32_t now)
     wifi_.update(now, config_.wifiReconnectIntervalMs);
 
     if (wifi_.isConnected() &&
-        (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= settings_.apiRequestIntervalMs))
+        (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= activeRequestIntervalMs(settings_)))
     {
         lastApiRequestMs_ = now;
         openSky_.requestStates(config_);
@@ -248,208 +299,28 @@ void RadarApp::updateSelectedAircraftForList(const Aircraft *aircraft, uint8_t a
 
 void RadarApp::renderFrame()
 {
+    const AppConfig renderConfig = runtimeRenderConfig();
     renderer_.renderRadarFrame(dataProvider_.aircraft(),
                                dataProvider_.count(),
                                selectedAircraftIndex_,
-                               config_,
-                               settings_.uiTheme);
+                               renderConfig,
+                               settings_.display.uiTheme);
 }
 
 void RadarApp::renderRealRadarFrame()
 {
+    const AppConfig renderConfig = runtimeRenderConfig();
     renderer_.renderRadarFrame(realAircraft_,
                                realAircraftCount_,
                                selectedAircraftIndex_,
-                               config_,
-                               settings_.uiTheme,
+                               renderConfig,
+                               settings_.display.uiTheme,
                                realRadarStatus_);
 }
 
 void RadarApp::renderApiTestScreen()
 {
     apiTestView_.render(wifi_, openSky_);
-}
-
-void RadarApp::requestRealTraffic()
-{
-    DebugLog::println("RealRadar API update:");
-    const bool requestOk = openSky_.requestStates(config_);
-
-    DebugLog::printf("  OpenSky raw states=%u valid lat/lon=%u stored=%u\r\n",
-                     openSky_.rawStateCount(),
-                     openSky_.validPositionCount(),
-                     openSky_.aircraftCount());
-
-    if (requestOk || openSky_.httpStatusCode() == 200)
-    {
-        convertApiAircraftToRadar();
-    }
-    else
-    {
-        DebugLog::printf("  API update failed, keeping previous radar data. status=%s\r\n",
-                         openSky_.lastError());
-    }
-
-    updateRealRadarStatus();
-}
-
-void RadarApp::convertApiAircraftToRadar()
-{
-    AircraftModel::clearAircraft(realAircraft_, AircraftModel::kAircraftCount);
-    realAircraftCount_ = 0;
-    RealRadarFilterStats stats;
-
-    const ApiAircraft *apiAircraft = openSky_.aircraft();
-    for (uint8_t i = 0; i < openSky_.aircraftCount(); ++i)
-    {
-        const ApiAircraft &source = apiAircraft[i];
-        if (!source.valid)
-        {
-            continue;
-        }
-
-        float distanceKm = 0.0f;
-        float bearingDeg = 0.0f;
-        if (!GeoUtils::geoToRadar(settings_.radarCenterLat,
-                                  settings_.radarCenterLon,
-                                  source.lat,
-                                  source.lon,
-                                  distanceKm,
-                                  bearingDeg))
-        {
-            continue;
-        }
-
-        if (distanceKm > settings_.maxRangeKm)
-        {
-            ++stats.filteredRange;
-            continue;
-        }
-
-        if (!settings_.showGroundTraffic)
-        {
-            if (source.onGround)
-            {
-                ++stats.filteredGround;
-                continue;
-            }
-
-            if (source.altitudeM < settings_.minAirborneAltitudeM)
-            {
-                ++stats.filteredAltitude;
-                continue;
-            }
-
-            if (source.speedMs < settings_.minAirborneSpeedMs)
-            {
-                ++stats.filteredSpeed;
-                continue;
-            }
-        }
-
-        const char *displayName = source.callsign[0] != '\0' ? source.callsign : source.icao24;
-        if (displayName[0] == '\0')
-        {
-            continue;
-        }
-
-        addRealAircraftSorted(source, displayName, distanceKm, bearingDeg);
-    }
-
-    printRealRadarFilterSummary(stats);
-
-    const int8_t firstValid = AircraftModel::firstValidIndex(realAircraft_, realAircraftCount_);
-    selectedAircraftIndex_ = firstValid >= 0 ? static_cast<uint8_t>(firstValid) : 0;
-}
-
-void RadarApp::addRealAircraftSorted(const ApiAircraft &source,
-                                     const char *displayName,
-                                     float distanceKm,
-                                     float bearingDeg)
-{
-    if (realAircraftCount_ >= AircraftModel::kAircraftCount &&
-        distanceKm >= realAircraft_[realAircraftCount_ - 1].distanceKm)
-    {
-        return;
-    }
-
-    uint8_t insertIndex = realAircraftCount_;
-    if (realAircraftCount_ < AircraftModel::kAircraftCount)
-    {
-        ++realAircraftCount_;
-    }
-    else
-    {
-        insertIndex = AircraftModel::kAircraftCount - 1;
-    }
-
-    AircraftModel::setAircraft(realAircraft_[insertIndex],
-                               displayName,
-                               distanceKm,
-                               bearingDeg,
-                               source.altitudeM,
-                               source.speedMs,
-                               source.headingDeg,
-                               true);
-    realAircraftLat_[insertIndex] = source.lat;
-    realAircraftLon_[insertIndex] = source.lon;
-    realAircraftOnGround_[insertIndex] = source.onGround;
-
-    while (insertIndex > 0 &&
-           realAircraft_[insertIndex].distanceKm < realAircraft_[insertIndex - 1].distanceKm)
-    {
-        const Aircraft aircraftTemp = realAircraft_[insertIndex - 1];
-        realAircraft_[insertIndex - 1] = realAircraft_[insertIndex];
-        realAircraft_[insertIndex] = aircraftTemp;
-
-        const float latTemp = realAircraftLat_[insertIndex - 1];
-        realAircraftLat_[insertIndex - 1] = realAircraftLat_[insertIndex];
-        realAircraftLat_[insertIndex] = latTemp;
-
-        const float lonTemp = realAircraftLon_[insertIndex - 1];
-        realAircraftLon_[insertIndex - 1] = realAircraftLon_[insertIndex];
-        realAircraftLon_[insertIndex] = lonTemp;
-
-        const bool onGroundTemp = realAircraftOnGround_[insertIndex - 1];
-        realAircraftOnGround_[insertIndex - 1] = realAircraftOnGround_[insertIndex];
-        realAircraftOnGround_[insertIndex] = onGroundTemp;
-
-        --insertIndex;
-    }
-}
-
-void RadarApp::printRealRadarFilterSummary(const RealRadarFilterStats &stats)
-{
-    DebugLog::println("RealRadar filter summary:");
-    DebugLog::printf("  raw=%u\r\n", openSky_.rawStateCount());
-    DebugLog::printf("  valid_pos=%u\r\n", openSky_.validPositionCount());
-    DebugLog::printf("  filtered_ground=%u\r\n", stats.filteredGround);
-    DebugLog::printf("  filtered_altitude=%u\r\n", stats.filteredAltitude);
-    DebugLog::printf("  filtered_speed=%u\r\n", stats.filteredSpeed);
-    DebugLog::printf("  filtered_range=%u\r\n", stats.filteredRange);
-    DebugLog::printf("  radar=%u\r\n", realAircraftCount_);
-
-    if (realAircraftCount_ == 0)
-    {
-        DebugLog::println("  no airborne aircraft after filter");
-        return;
-    }
-
-    for (uint8_t i = 0; i < realAircraftCount_; ++i)
-    {
-        const Aircraft &target = realAircraft_[i];
-        DebugLog::printf("  radar #%u %-11s lat=%.5f lon=%.5f dist=%.1fkm bearing=%.0f alt=%.0fm speed=%.1fm/s hdg=%.0f onGround=%u\r\n",
-                         i + 1,
-                         target.callsign,
-                         realAircraftLat_[i],
-                         realAircraftLon_[i],
-                         target.distanceKm,
-                         target.bearingDeg,
-                         target.altitudeM,
-                         target.speedMs,
-                         target.headingDeg,
-                         realAircraftOnGround_[i] ? 1 : 0);
-    }
 }
 
 void RadarApp::updateRealRadarStatus()
@@ -597,4 +468,12 @@ void RadarApp::printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const
                      stats.filteredSpeed,
                      stats.filteredRange);
     DebugLog::printf("  rendered aircraft count=%u\r\n", stats.renderedAircraftCount);
+}
+
+AppConfig RadarApp::runtimeRenderConfig() const
+{
+    AppConfig renderConfig = config_;
+    renderConfig.maxRangeKm = settings_.location.maxRangeKm;
+    renderConfig.showLabels = settings_.display.showLabels;
+    return renderConfig;
 }

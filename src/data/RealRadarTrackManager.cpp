@@ -105,17 +105,17 @@ void RealRadarTrackManager::updatePrediction(const UserSettings &settings, uint3
         }
 
         uint32_t elapsedSinceApiMs = now - track.lastApiUpdateMs;
-        if (elapsedSinceApiMs > settings.predictionMaxMs)
+        if (elapsedSinceApiMs > settings.prediction.predictionMaxMs)
         {
-            elapsedSinceApiMs = settings.predictionMaxMs;
+            elapsedSinceApiMs = settings.prediction.predictionMaxMs;
             track.stale = true;
         }
 
         float predictedLat = track.apiLat;
         float predictedLon = track.apiLon;
-        const bool canPredict = settings.predictionEnabled &&
+        const bool canPredict = settings.prediction.enabled &&
                                 !track.onGround &&
-                                track.apiSpeedMs >= settings.lowSpeedPredictionThresholdMs;
+                                track.apiSpeedMs >= settings.prediction.lowSpeedThresholdMs;
 
         if (canPredict)
         {
@@ -128,13 +128,13 @@ void RealRadarTrackManager::updatePrediction(const UserSettings &settings, uint3
                                       predictedLon);
         }
 
-        track.displayLat += (predictedLat - track.displayLat) * settings.predictionFollowAlpha;
-        track.displayLon += (predictedLon - track.displayLon) * settings.predictionFollowAlpha;
-        track.displayAltitudeM += (track.apiAltitudeM - track.displayAltitudeM) * settings.predictionFollowAlpha;
-        track.displaySpeedMs += (track.apiSpeedMs - track.displaySpeedMs) * settings.predictionFollowAlpha;
+        track.displayLat += (predictedLat - track.displayLat) * settings.prediction.followAlpha;
+        track.displayLon += (predictedLon - track.displayLon) * settings.prediction.followAlpha;
+        track.displayAltitudeM += (track.apiAltitudeM - track.displayAltitudeM) * settings.prediction.followAlpha;
+        track.displaySpeedMs += (track.apiSpeedMs - track.displaySpeedMs) * settings.prediction.followAlpha;
         track.displayHeadingDeg = smoothAngle(track.displayHeadingDeg,
                                               track.apiHeadingDeg,
-                                              settings.predictionFollowAlpha);
+                                              settings.prediction.followAlpha);
         track.lastPredictMs = now;
     }
 }
@@ -172,7 +172,7 @@ void RealRadarTrackManager::printPredictionSummary(const UserSettings &settings,
     DebugLog::printf("  active=%u stale=%u prediction=%u\r\n",
                      activeCount,
                      staleCount,
-                     settings.predictionEnabled ? 1 : 0);
+                     settings.prediction.enabled ? 1 : 0);
 
     if (firstTrack == nullptr)
     {
@@ -184,14 +184,14 @@ void RealRadarTrackManager::printPredictionSummary(const UserSettings &settings,
     float apiBearingDeg = 0.0f;
     float displayDistanceKm = 0.0f;
     float displayBearingDeg = 0.0f;
-    GeoUtils::geoToRadar(settings.radarCenterLat,
-                         settings.radarCenterLon,
+    GeoUtils::geoToRadar(settings.location.centerLat,
+                         settings.location.centerLon,
                          firstTrack->apiLat,
                          firstTrack->apiLon,
                          apiDistanceKm,
                          apiBearingDeg);
-    GeoUtils::geoToRadar(settings.radarCenterLat,
-                         settings.radarCenterLon,
+    GeoUtils::geoToRadar(settings.location.centerLat,
+                         settings.location.centerLon,
                          firstTrack->displayLat,
                          firstTrack->displayLon,
                          displayDistanceKm,
@@ -224,8 +224,8 @@ uint8_t RealRadarTrackManager::buildAircraft(const UserSettings &settings,
 
         float distanceKm = 0.0f;
         float bearingDeg = 0.0f;
-        if (!GeoUtils::geoToRadar(settings.radarCenterLat,
-                                  settings.radarCenterLon,
+        if (!GeoUtils::geoToRadar(settings.location.centerLat,
+                                  settings.location.centerLon,
                                   track.displayLat,
                                   track.displayLon,
                                   distanceKm,
@@ -234,13 +234,13 @@ uint8_t RealRadarTrackManager::buildAircraft(const UserSettings &settings,
             continue;
         }
 
-        if (distanceKm > settings.maxRangeKm)
+        if (distanceKm > settings.location.maxRangeKm)
         {
             ++stats.filteredRange;
             continue;
         }
 
-        if (!settings.showGroundTraffic)
+        if (!settings.filter.showGroundTraffic)
         {
             if (track.onGround)
             {
@@ -248,13 +248,13 @@ uint8_t RealRadarTrackManager::buildAircraft(const UserSettings &settings,
                 continue;
             }
 
-            if (track.displayAltitudeM < settings.minAirborneAltitudeM)
+            if (track.displayAltitudeM < settings.filter.minAirborneAltitudeM)
             {
                 ++stats.filteredAltitude;
                 continue;
             }
 
-            if (track.displaySpeedMs < settings.minAirborneSpeedMs)
+            if (track.displaySpeedMs < settings.filter.minAirborneSpeedMs)
             {
                 ++stats.filteredSpeed;
                 continue;
@@ -334,7 +334,7 @@ bool RealRadarTrackManager::updateTrackFromApi(TrackedAircraft &track,
                              source.lon,
                              snapDistanceKm,
                              ignoredBearingDeg) &&
-        snapDistanceKm > settings.jumpResetDistanceKm)
+        snapDistanceKm > settings.prediction.jumpResetDistanceKm)
     {
         track.displayLat = source.lat;
         track.displayLon = source.lon;
@@ -364,13 +364,13 @@ void RealRadarTrackManager::pruneStaleTracks(const UserSettings &settings, uint3
         }
 
         const uint32_t ageMs = now - track.lastSeenMs;
-        if (ageMs > settings.staleTimeoutMs)
+        if (ageMs > settings.prediction.staleTimeoutMs)
         {
             memset(&track, 0, sizeof(track));
             continue;
         }
 
-        if (ageMs > settings.staleGraceMs)
+        if (ageMs > settings.prediction.staleTimeoutMs / 2)
         {
             track.stale = true;
         }

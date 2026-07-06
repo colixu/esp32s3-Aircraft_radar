@@ -5,7 +5,7 @@
 
 #include "../app/DebugLog.h"
 
-bool OpenSkyAsyncUpdater::begin(const AppConfig &config, uint32_t requestIntervalMs)
+bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &settings, uint32_t requestIntervalMs)
 {
     if (taskHandle_ != nullptr)
     {
@@ -13,6 +13,10 @@ bool OpenSkyAsyncUpdater::begin(const AppConfig &config, uint32_t requestInterva
     }
 
     config_ = config;
+    config_.openSkyLamin = settings.location.queryLatMin;
+    config_.openSkyLomin = settings.location.queryLonMin;
+    config_.openSkyLamax = settings.location.queryLatMax;
+    config_.openSkyLomax = settings.location.queryLonMax;
     requestIntervalMs_ = requestIntervalMs;
     mutex_ = xSemaphoreCreateMutex();
     if (mutex_ == nullptr)

@@ -16,31 +16,24 @@ bool SettingsStore::begin()
 bool SettingsStore::load(UserSettings &settings)
 {
     loadDefaultUserSettings(settings, config_);
+    sanitizeUserSettings(settings);
     DebugLog::println("Loaded user settings:");
-    DebugLog::printf("  uiTheme=%s\r\n", uiThemeName(settings.uiTheme));
-    DebugLog::printf("  maxRangeKm=%.0f\r\n", settings.maxRangeKm);
-    DebugLog::printf("  radarCenterLat=%.5f\r\n", settings.radarCenterLat);
-    DebugLog::printf("  radarCenterLon=%.5f\r\n", settings.radarCenterLon);
-    DebugLog::printf("  showGroundTraffic=%u\r\n", settings.showGroundTraffic ? 1 : 0);
-    DebugLog::printf("  minAirborneAltitudeM=%.0f\r\n", settings.minAirborneAltitudeM);
-    DebugLog::printf("  minAirborneSpeedMs=%.1f\r\n", settings.minAirborneSpeedMs);
-    DebugLog::printf("  apiRequestIntervalMs=%lu\r\n", static_cast<unsigned long>(settings.apiRequestIntervalMs));
-    DebugLog::printf("  predictionEnabled=%u\r\n", settings.predictionEnabled ? 1 : 0);
-    DebugLog::printf("  predictionFollowAlpha=%.2f\r\n", settings.predictionFollowAlpha);
-    DebugLog::printf("  predictionMaxMs=%lu\r\n", static_cast<unsigned long>(settings.predictionMaxMs));
-    DebugLog::printf("  jumpResetDistanceKm=%.1f\r\n", settings.jumpResetDistanceKm);
-    DebugLog::printf("  staleTimeoutMs=%lu\r\n", static_cast<unsigned long>(settings.staleTimeoutMs));
+    printUserSettings(settings);
     return true;
 }
 
 bool SettingsStore::save(const UserSettings &settings)
 {
     // Future version: replace this stub with NVS / Preferences persistence.
-    DebugLog::printf("SettingsStore save stub: uiTheme=%s\r\n", uiThemeName(settings.uiTheme));
+    DebugLog::printf("SettingsStore save stub: uiTheme=%s range=%.0fkm ground=%u\r\n",
+                     uiThemeName(settings.display.uiTheme),
+                     settings.location.maxRangeKm,
+                     settings.filter.showGroundTraffic ? 1 : 0);
     return true;
 }
 
 void SettingsStore::resetToDefault(UserSettings &settings)
 {
     loadDefaultUserSettings(settings, config_);
+    sanitizeUserSettings(settings);
 }
