@@ -26,6 +26,7 @@ void RadarRenderer::renderRadarFrame(const Aircraft *aircraft,
                                      uint8_t aircraftCount,
                                      uint8_t selectedAircraftIndex,
                                      const AppConfig &config,
+                                     UiTheme theme,
                                      const char *statusText)
 {
     if (!frameBufferReady_)
@@ -33,9 +34,81 @@ void RadarRenderer::renderRadarFrame(const Aircraft *aircraft,
         return;
     }
 
+    switch (theme)
+    {
+        case UiTheme::ModernRadar:
+            renderModernPlaceholder(aircraftCount, statusText);
+            return;
+        case UiTheme::CyberpunkRadar:
+            renderCyberpunkPlaceholder(aircraftCount, statusText);
+            return;
+        case UiTheme::ClassicRadar:
+        default:
+            renderClassicRadarFrame(aircraft, aircraftCount, selectedAircraftIndex, config, statusText);
+            return;
+    }
+}
+
+void RadarRenderer::renderClassicRadarFrame(const Aircraft *aircraft,
+                                            uint8_t aircraftCount,
+                                            uint8_t selectedAircraftIndex,
+                                            const AppConfig &config,
+                                            const char *statusText)
+{
     drawRadarBackground(frame_);
     drawScanSweep(frame_);
     drawAircraftTargets(frame_, aircraft, aircraftCount, selectedAircraftIndex, config);
+    drawStatusText(frame_, statusText);
+    frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::renderModernPlaceholder(uint8_t aircraftCount, const char *statusText)
+{
+    frame_.fillSprite(TFT_BLACK);
+
+    const uint16_t lineColor = tft_.color565(60, 180, 180);
+    const uint16_t textColor = tft_.color565(180, 255, 240);
+    const uint16_t dimColor = tft_.color565(20, 80, 90);
+
+    frame_.drawCircle(kCenterX, kCenterY, 116, lineColor);
+    frame_.drawLine(38, 72, 202, 72, dimColor);
+    frame_.drawLine(38, 168, 202, 168, dimColor);
+    frame_.drawRect(58, 92, 124, 56, dimColor);
+
+    char line[32];
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(textColor, TFT_BLACK);
+    frame_.drawString("MODERN MODE", kCenterX, 106, 2);
+    snprintf(line, sizeof(line), "AIRCRAFT %u", aircraftCount);
+    frame_.drawString(line, kCenterX, 128, 1);
+
+    drawStatusText(frame_, statusText);
+    frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::renderCyberpunkPlaceholder(uint8_t aircraftCount, const char *statusText)
+{
+    frame_.fillSprite(TFT_BLACK);
+
+    const uint16_t magenta = tft_.color565(220, 0, 160);
+    const uint16_t cyan = tft_.color565(0, 220, 220);
+    const uint16_t dimMagenta = tft_.color565(70, 0, 52);
+
+    frame_.drawCircle(kCenterX, kCenterY, 116, dimMagenta);
+    frame_.drawLine(48, 58, 190, 86, magenta);
+    frame_.drawLine(50, 178, 192, 150, cyan);
+    frame_.drawRect(64, 86, 112, 68, dimMagenta);
+    frame_.drawFastHLine(72, 98, 96, cyan);
+    frame_.drawFastHLine(72, 142, 96, magenta);
+
+    char line[32];
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(cyan, TFT_BLACK);
+    frame_.drawString("CYBERPUNK MODE", kCenterX, 110, 2);
+    snprintf(line, sizeof(line), "AIRCRAFT %u", aircraftCount);
+    frame_.setTextColor(magenta, TFT_BLACK);
+    frame_.drawString(line, kCenterX, 132, 1);
+
     drawStatusText(frame_, statusText);
     frame_.pushSprite(0, 0);
 }

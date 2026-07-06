@@ -4,6 +4,7 @@
 
 #include "../aircraft/AircraftModel.h"
 #include "../app/AppConfig.h"
+#include "../app/UserSettings.h"
 
 class RadarRenderer
 {
@@ -16,6 +17,7 @@ public:
                           uint8_t aircraftCount,
                           uint8_t selectedAircraftIndex,
                           const AppConfig &config,
+                          UiTheme theme = UiTheme::ClassicRadar,
                           const char *statusText = nullptr);
     void advanceSweep(float stepDeg);
 
@@ -74,4 +76,11 @@ private:
                              uint8_t selectedAircraftIndex,
                              const AppConfig &config);
     void drawStatusText(TFT_eSprite &canvas, const char *statusText);
+    void renderClassicRadarFrame(const Aircraft *aircraft,
+                                 uint8_t aircraftCount,
+                                 uint8_t selectedAircraftIndex,
+                                 const AppConfig &config,
+                                 const char *statusText);
+    void renderModernPlaceholder(uint8_t aircraftCount, const char *statusText);
+    void renderCyberpunkPlaceholder(uint8_t aircraftCount, const char *statusText);
 };

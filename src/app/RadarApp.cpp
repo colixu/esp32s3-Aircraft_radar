@@ -4,6 +4,7 @@
 #include "../utils/GeoUtils.h"
 
 RadarApp::RadarApp() :
+    settingsStore_(config_),
     tft_(),
     renderer_(tft_),
     apiTestView_(tft_)
@@ -16,6 +17,9 @@ void RadarApp::begin()
     delay(800);
     DebugLog::println();
     DebugLog::println("ESP32-S3 GC9A01 aircraft radar");
+    settingsStore_.begin();
+    settingsStore_.load(settings_);
+    inputManager_.begin(settings_.uiButtonPin);
 
     if (config_.appMode == AppMode::ApiTest)
     {
@@ -35,6 +39,7 @@ void RadarApp::begin()
 void RadarApp::update()
 {
     const uint32_t now = millis();
+    updateInput();
 
     if (config_.appMode == AppMode::ApiTest)
     {
@@ -75,13 +80,13 @@ void RadarApp::beginRealRadar()
 {
     DebugLog::println("Starting RealRadar mode.");
     DebugLog::printf("Radar center: lat=%.5f lon=%.5f range=%.0fkm\r\n",
-                     config_.radarCenterLat,
-                     config_.radarCenterLon,
-                     config_.maxRangeKm);
+                     settings_.radarCenterLat,
+                     settings_.radarCenterLon,
+                     settings_.maxRangeKm);
     DebugLog::printf("RealRadar filters: ground=%s minAlt=%.0fm minSpeed=%.1fm/s\r\n",
-                     config_.showGroundTraffic ? "show" : "hide",
-                     config_.minAirborneAltitudeM,
-                     config_.minAirborneSpeedMs);
+                     settings_.showGroundTraffic ? "show" : "hide",
+                     settings_.minAirborneAltitudeM,
+                     settings_.minAirborneSpeedMs);
     DebugLog::printf("OpenSky bbox: lat %.4f..%.4f lon %.4f..%.4f\r\n",
                      config_.openSkyLamin,
                      config_.openSkyLamax,
@@ -95,6 +100,28 @@ void RadarApp::beginRealRadar()
     renderer_.begin();
     wifi_.begin();
     renderRealRadarFrame();
+}
+
+void RadarApp::updateInput()
+{
+    inputManager_.update();
+
+    if (inputManager_.wasUiSwitchPressed())
+    {
+        switchUiTheme();
+    }
+}
+
+void RadarApp::switchUiTheme()
+{
+    settings_.uiTheme = nextUiTheme(settings_.uiTheme);
+    DebugLog::printf("UI theme switched: %s\r\n", uiThemeName(settings_.uiTheme));
+    settingsStore_.save(settings_);
+
+    if (config_.appMode == AppMode::RealRadar)
+    {
+        renderRealRadarFrame();
+    }
 }
 
 void RadarApp::updateRadarDemo(uint32_t now)
@@ -117,7 +144,7 @@ void RadarApp::updateApiTest(uint32_t now)
     wifi_.update(now, config_.wifiReconnectIntervalMs);
 
     if (wifi_.isConnected() &&
-        (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= config_.apiRequestIntervalMs))
+        (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= settings_.apiRequestIntervalMs))
     {
         lastApiRequestMs_ = now;
         openSky_.requestStates(config_);
@@ -215,7 +242,8 @@ void RadarApp::renderFrame()
     renderer_.renderRadarFrame(dataProvider_.aircraft(),
                                dataProvider_.count(),
                                selectedAircraftIndex_,
-                               config_);
+                               config_,
+                               settings_.uiTheme);
 }
 
 void RadarApp::renderRealRadarFrame()
@@ -224,6 +252,7 @@ void RadarApp::renderRealRadarFrame()
                                realAircraftCount_,
                                selectedAircraftIndex_,
                                config_,
+                               settings_.uiTheme,
                                realRadarStatus_);
 }
 
@@ -272,8 +301,8 @@ void RadarApp::convertApiAircraftToRadar()
 
         float distanceKm = 0.0f;
         float bearingDeg = 0.0f;
-        if (!GeoUtils::geoToRadar(config_.radarCenterLat,
-                                  config_.radarCenterLon,
+        if (!GeoUtils::geoToRadar(settings_.radarCenterLat,
+                                  settings_.radarCenterLon,
                                   source.lat,
                                   source.lon,
                                   distanceKm,
@@ -282,13 +311,13 @@ void RadarApp::convertApiAircraftToRadar()
             continue;
         }
 
-        if (distanceKm > config_.maxRangeKm)
+        if (distanceKm > settings_.maxRangeKm)
         {
             ++stats.filteredRange;
             continue;
         }
 
-        if (!config_.showGroundTraffic)
+        if (!settings_.showGroundTraffic)
         {
             if (source.onGround)
             {
@@ -296,13 +325,13 @@ void RadarApp::convertApiAircraftToRadar()
                 continue;
             }
 
-            if (source.altitudeM < config_.minAirborneAltitudeM)
+            if (source.altitudeM < settings_.minAirborneAltitudeM)
             {
                 ++stats.filteredAltitude;
                 continue;
             }
 
-            if (source.speedMs < config_.minAirborneSpeedMs)
+            if (source.speedMs < settings_.minAirborneSpeedMs)
             {
                 ++stats.filteredSpeed;
                 continue;

@@ -9,6 +9,9 @@
 #include "../data/OpenSkyProvider.h"
 #include "../ui/ApiTestView.h"
 #include "../ui/RadarRenderer.h"
+#include "InputManager.h"
+#include "SettingsStore.h"
+#include "UserSettings.h"
 #include "WifiManagerSimple.h"
 
 class RadarApp
@@ -21,6 +24,9 @@ public:
 
 private:
     AppConfig config_;
+    SettingsStore settingsStore_;
+    UserSettings settings_;
+    InputManager inputManager_;
     TFT_eSPI tft_;
     FakeDataProvider dataProvider_;
     RadarRenderer renderer_;
@@ -53,6 +59,8 @@ private:
     void beginRadarDemo();
     void beginApiTest();
     void beginRealRadar();
+    void updateInput();
+    void switchUiTheme();
     void updateRadarDemo(uint32_t now);
     void updateApiTest(uint32_t now);
     void updateRealRadar(uint32_t now);
