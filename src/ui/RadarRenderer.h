@@ -20,6 +20,10 @@ public:
                           UiTheme theme = UiTheme::ClassicRadar,
                           const char *statusText = nullptr);
     void advanceSweep(float stepDeg);
+    void renderSetupPortalFrame(const char *apSsid,
+                                const char *apPassword,
+                                const char *ipAddress,
+                                const char *statusText);
 
 private:
     static constexpr int16_t kCenterX = 120;

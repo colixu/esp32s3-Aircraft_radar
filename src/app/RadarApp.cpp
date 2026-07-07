@@ -1,5 +1,7 @@
 #include "RadarApp.h"
 
+#include <WiFi.h>
+
 #include "DebugLog.h"
 #include "../utils/GeoUtils.h"
 
@@ -20,15 +22,30 @@ void RadarApp::begin()
     settingsStore_.begin();
     settingsStore_.load(settings_);
     inputManager_.begin(settings_.system.uiButtonPin);
+    printSerialHelp();
+    beginConfiguredMode();
+}
 
+void RadarApp::beginConfiguredMode()
+{
     if (config_.appMode == AppMode::ApiTest)
     {
+        if (!connectToConfiguredWiFi())
+        {
+            enterSetupPortal("WiFi setup required");
+            return;
+        }
         beginApiTest();
         return;
     }
 
     if (config_.appMode == AppMode::RealRadar)
     {
+        if (!connectToConfiguredWiFi())
+        {
+            enterSetupPortal("WiFi setup required");
+            return;
+        }
         beginRealRadar();
         return;
     }
@@ -40,6 +57,12 @@ void RadarApp::update()
 {
     const uint32_t now = millis();
     updateInput();
+
+    if (deviceState_ == DeviceState::SetupPortal)
+    {
+        updateSetupPortal(now);
+        return;
+    }
 
     if (config_.appMode == AppMode::ApiTest)
     {
@@ -58,9 +81,13 @@ void RadarApp::update()
 
 void RadarApp::beginRadarDemo()
 {
+    setDeviceState(DeviceState::Running);
     DebugLog::println("Starting RadarDemo mode.");
     dataProvider_.begin();
-    renderer_.begin();
+    if (!renderer_.isReady())
+    {
+        renderer_.begin();
+    }
     renderFrame();
 
     DebugLog::println("Fake aircraft radar UI is running.");
@@ -68,16 +95,18 @@ void RadarApp::beginRadarDemo()
 
 void RadarApp::beginApiTest()
 {
+    setDeviceState(DeviceState::Running);
     DebugLog::println("Starting ApiTest mode.");
     DebugLog::println("Logs use the upload USB/UART port at 115200 baud.");
     apiTestView_.begin();
-    wifi_.begin();
+    startWifiManagerFromSettings();
     renderApiTestScreen();
     printApiTestSerialStatus();
 }
 
 void RadarApp::beginRealRadar()
 {
+    setDeviceState(DeviceState::Running);
     DebugLog::println("Starting RealRadar mode.");
     DebugLog::printf("Radar center: lat=%.5f lon=%.5f range=%.0fkm\r\n",
                      settings_.location.centerLat,
@@ -98,8 +127,11 @@ void RadarApp::beginRealRadar()
     realTrackManager_.begin();
     updateRealRadarStatus();
 
-    renderer_.begin();
-    wifi_.begin();
+    if (!renderer_.isReady())
+    {
+        renderer_.begin();
+    }
+    startWifiManagerFromSettings();
     realApiUpdater_.begin(config_, settings_, activeRequestIntervalMs(settings_));
     renderRealRadarFrame();
 }
@@ -108,6 +140,29 @@ void RadarApp::updateInput()
 {
     inputManager_.update();
 
+    if (inputManager_.wasHelpPressed())
+    {
+        printSerialHelp();
+    }
+    if (inputManager_.wasRebootPressed())
+    {
+        DebugLog::println("Reboot requested from serial.");
+        delay(100);
+        ESP.restart();
+    }
+    if (inputManager_.wasConfigPortalPressed())
+    {
+        enterSetupPortal("Serial command");
+        return;
+    }
+    if (inputManager_.wasExitConfigPortalPressed())
+    {
+        if (deviceState_ == DeviceState::SetupPortal)
+        {
+            exitSetupPortal();
+        }
+        return;
+    }
     if (inputManager_.wasUiSwitchPressed())
     {
         switchUiTheme();
@@ -143,6 +198,22 @@ void RadarApp::updateInput()
             renderRealRadarFrame();
         }
     }
+}
+
+void RadarApp::printSerialHelp()
+{
+    DebugLog::println("Serial commands:");
+    DebugLog::println("  h: help");
+    DebugLog::println("  p: print UserSettings");
+    DebugLog::println("  c: enter setup portal");
+    DebugLog::println("  x: exit setup portal");
+    DebugLog::println("  u: switch UI theme");
+    DebugLog::println("  r: switch radar range");
+    DebugLog::println("  g: toggle ground traffic");
+    DebugLog::println("  s: save settings");
+    DebugLog::println("  l: load settings");
+    DebugLog::println("  d: reset settings to default");
+    DebugLog::println("  b: reboot device");
 }
 
 void RadarApp::switchUiTheme()
@@ -192,6 +263,110 @@ void RadarApp::resetSettingsToDefault()
     settingsStore_.save(settings_);
 }
 
+void RadarApp::enterSetupPortal(const char *reason)
+{
+    if (configPortal_.isRunning())
+    {
+        renderSetupPortalFrame(reason);
+        return;
+    }
+
+    DebugLog::printf("Entering setup portal: %s\r\n", reason != nullptr ? reason : "requested");
+    realApiUpdater_.stop();
+    wifiManagerStarted_ = false;
+    setDeviceState(DeviceState::SetupPortal);
+
+    if (!renderer_.isReady())
+    {
+        renderer_.begin();
+    }
+
+    configPortal_.begin(&settings_, &settingsStore_);
+    renderSetupPortalFrame(reason);
+}
+
+void RadarApp::exitSetupPortal()
+{
+    DebugLog::println("Exiting setup portal.");
+    configPortal_.stop();
+    wifiLostSinceMs_ = 0;
+    beginConfiguredMode();
+}
+
+void RadarApp::updateSetupPortal(uint32_t now)
+{
+    (void)now;
+    configPortal_.update();
+
+    if (configPortal_.shouldRestart())
+    {
+        renderSetupPortalFrame("Restarting...");
+        delay(300);
+        ESP.restart();
+    }
+}
+
+void RadarApp::renderSetupPortalFrame(const char *statusText)
+{
+    renderer_.renderSetupPortalFrame(configPortal_.apSsid(),
+                                     configPortal_.apPassword(),
+                                     configPortal_.ipAddress(),
+                                     statusText);
+}
+
+void RadarApp::setDeviceState(DeviceState state)
+{
+    if (deviceState_ == state)
+    {
+        return;
+    }
+
+    deviceState_ = state;
+    DebugLog::printf("Device state: %d\r\n", static_cast<int>(deviceState_));
+}
+
+bool RadarApp::connectToConfiguredWiFi()
+{
+    if (!settings_.wifi.configured || settings_.wifi.ssid[0] == '\0')
+    {
+        DebugLog::println("WiFi is not configured in UserSettings.");
+        return false;
+    }
+
+    setDeviceState(DeviceState::ConnectWiFi);
+    startWifiManagerFromSettings();
+
+    const uint32_t startMs = millis();
+    while (!wifi_.isConnected() && millis() - startMs < 12000)
+    {
+        wifi_.update(millis(), 1000);
+        delay(100);
+    }
+
+    if (!wifi_.isConnected())
+    {
+        setDeviceState(DeviceState::WiFiLost);
+        DebugLog::println("Configured WiFi connection failed.");
+        return false;
+    }
+
+    DebugLog::printf("Configured WiFi connected. IP=%s RSSI=%d\r\n",
+                     WiFi.localIP().toString().c_str(),
+                     WiFi.RSSI());
+    return true;
+}
+
+void RadarApp::startWifiManagerFromSettings()
+{
+    if (wifiManagerStarted_)
+    {
+        return;
+    }
+
+    wifi_.begin(settings_.wifi.ssid, settings_.wifi.password);
+    wifiManagerStarted_ = true;
+}
+
 void RadarApp::updateRadarDemo(uint32_t now)
 {
     updateAircraftData(now);
@@ -210,6 +385,22 @@ void RadarApp::updateRadarDemo(uint32_t now)
 void RadarApp::updateApiTest(uint32_t now)
 {
     wifi_.update(now, config_.wifiReconnectIntervalMs);
+    if (!wifi_.isConnected())
+    {
+        if (wifiLostSinceMs_ == 0)
+        {
+            wifiLostSinceMs_ = now;
+        }
+        else if (now - wifiLostSinceMs_ > 30000)
+        {
+            enterSetupPortal("WiFi lost");
+            return;
+        }
+    }
+    else
+    {
+        wifiLostSinceMs_ = 0;
+    }
 
     if (wifi_.isConnected() &&
         (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= activeRequestIntervalMs(settings_)))
@@ -237,6 +428,22 @@ void RadarApp::updateApiTest(uint32_t now)
 void RadarApp::updateRealRadar(uint32_t now)
 {
     wifi_.update(now, config_.wifiReconnectIntervalMs);
+    if (!wifi_.isConnected())
+    {
+        if (wifiLostSinceMs_ == 0)
+        {
+            wifiLostSinceMs_ = now;
+        }
+        else if (now - wifiLostSinceMs_ > 30000)
+        {
+            enterSetupPortal("WiFi lost");
+            return;
+        }
+    }
+    else
+    {
+        wifiLostSinceMs_ = 0;
+    }
 
     OpenSkySnapshot snapshot;
     if (realApiUpdater_.copySnapshot(snapshot))

@@ -43,6 +43,22 @@ void InputManager::update()
         {
             loadSettingsPressed_ = true;
         }
+        else if (command == 'h' || command == 'H')
+        {
+            helpPressed_ = true;
+        }
+        else if (command == 'c' || command == 'C')
+        {
+            configPortalPressed_ = true;
+        }
+        else if (command == 'x' || command == 'X')
+        {
+            exitConfigPortalPressed_ = true;
+        }
+        else if (command == 'b' || command == 'B')
+        {
+            rebootPressed_ = true;
+        }
     }
 
     // Hardware button support is intentionally reserved for a later pass.
@@ -94,5 +110,33 @@ bool InputManager::wasLoadSettingsPressed()
 {
     const bool pressed = loadSettingsPressed_;
     loadSettingsPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasHelpPressed()
+{
+    const bool pressed = helpPressed_;
+    helpPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasConfigPortalPressed()
+{
+    const bool pressed = configPortalPressed_;
+    configPortalPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasExitConfigPortalPressed()
+{
+    const bool pressed = exitConfigPortalPressed_;
+    exitConfigPortalPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasRebootPressed()
+{
+    const bool pressed = rebootPressed_;
+    rebootPressed_ = false;
     return pressed;
 }

@@ -14,6 +14,10 @@ public:
     bool wasResetDefaultsPressed();
     bool wasSaveSettingsPressed();
     bool wasLoadSettingsPressed();
+    bool wasHelpPressed();
+    bool wasConfigPortalPressed();
+    bool wasExitConfigPortalPressed();
+    bool wasRebootPressed();
 
 private:
     int buttonPin_ = -1;
@@ -24,4 +28,8 @@ private:
     bool resetDefaultsPressed_ = false;
     bool saveSettingsPressed_ = false;
     bool loadSettingsPressed_ = false;
+    bool helpPressed_ = false;
+    bool configPortalPressed_ = false;
+    bool exitConfigPortalPressed_ = false;
+    bool rebootPressed_ = false;
 };

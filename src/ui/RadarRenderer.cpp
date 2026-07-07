@@ -118,6 +118,49 @@ void RadarRenderer::advanceSweep(float stepDeg)
     sweepAngleDeg_ = AircraftModel::wrapDegrees(sweepAngleDeg_ + stepDeg);
 }
 
+void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
+                                           const char *apPassword,
+                                           const char *ipAddress,
+                                           const char *statusText)
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    frame_.fillSprite(TFT_BLACK);
+    frame_.drawCircle(kCenterX, kCenterY, 116, radarGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 40, dimGreen_);
+
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(sweepGreen_, TFT_BLACK);
+    frame_.drawString("SETUP MODE", kCenterX, 68, 2);
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString("AP", kCenterX, 94, 1);
+    frame_.setTextColor(selectedGreen_, TFT_BLACK);
+    frame_.drawString(apSsid != nullptr ? apSsid : "", kCenterX, 108, 1);
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString("PASS", kCenterX, 128, 1);
+    frame_.setTextColor(selectedGreen_, TFT_BLACK);
+    frame_.drawString(apPassword != nullptr ? apPassword : "", kCenterX, 142, 1);
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString("URL", kCenterX, 162, 1);
+    frame_.setTextColor(selectedGreen_, TFT_BLACK);
+    frame_.drawString(ipAddress != nullptr ? ipAddress : "192.168.4.1", kCenterX, 176, 1);
+
+    if (statusText != nullptr && statusText[0] != '\0')
+    {
+        frame_.setTextColor(labelGreen_, TFT_BLACK);
+        frame_.drawString(statusText, kCenterX, 204, 1);
+    }
+
+    frame_.pushSprite(0, 0);
+}
+
 void RadarRenderer::printDisplaySetup()
 {
     setup_t setup;

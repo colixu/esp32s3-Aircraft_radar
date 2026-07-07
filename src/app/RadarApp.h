@@ -11,6 +11,7 @@
 #include "../data/RealRadarTrackManager.h"
 #include "../ui/ApiTestView.h"
 #include "../ui/RadarRenderer.h"
+#include "ConfigPortal.h"
 #include "InputManager.h"
 #include "SettingsStore.h"
 #include "UserSettings.h"
@@ -29,6 +30,7 @@ private:
     SettingsStore settingsStore_;
     UserSettings settings_;
     InputManager inputManager_;
+    ConfigPortal configPortal_;
     TFT_eSPI tft_;
     FakeDataProvider dataProvider_;
     RadarRenderer renderer_;
@@ -40,6 +42,8 @@ private:
     Aircraft realAircraft_[AircraftModel::kAircraftCount];
     uint8_t realAircraftCount_ = 0;
     char realRadarStatus_[32] = "LIVE WAIT";
+    DeviceState deviceState_ = DeviceState::Boot;
+    bool wifiManagerStarted_ = false;
 
     uint8_t selectedAircraftIndex_ = 0;
     uint32_t lastFrameMs_ = 0;
@@ -49,15 +53,25 @@ private:
     uint32_t lastApiScreenMs_ = 0;
     uint32_t lastApiSerialMs_ = 0;
     uint32_t lastPredictionSummaryMs_ = 0;
+    uint32_t wifiLostSinceMs_ = 0;
 
+    void beginConfiguredMode();
     void beginRadarDemo();
     void beginApiTest();
     void beginRealRadar();
     void updateInput();
+    void printSerialHelp();
     void switchUiTheme();
     void switchRange();
     void toggleGroundTraffic();
     void resetSettingsToDefault();
+    void enterSetupPortal(const char *reason);
+    void exitSetupPortal();
+    void updateSetupPortal(uint32_t now);
+    void renderSetupPortalFrame(const char *statusText);
+    void setDeviceState(DeviceState state);
+    bool connectToConfiguredWiFi();
+    void startWifiManagerFromSettings();
     void updateRadarDemo(uint32_t now);
     void updateApiTest(uint32_t now);
     void updateRealRadar(uint32_t now);

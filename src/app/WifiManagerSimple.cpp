@@ -1,15 +1,28 @@
 #include "WifiManagerSimple.h"
 
 #include <WiFi.h>
+#include <string.h>
 
 #include "DebugLog.h"
 #include "WifiConfig.h"
 
 void WifiManagerSimple::begin()
 {
-    DebugLog::println("Starting WiFi for API test...");
+    begin(WifiConfig::kSsid, WifiConfig::kPassword);
+}
+
+void WifiManagerSimple::begin(const char *ssid, const char *password)
+{
+    strncpy(ssid_, ssid != nullptr ? ssid : "", sizeof(ssid_) - 1);
+    ssid_[sizeof(ssid_) - 1] = '\0';
+    strncpy(password_, password != nullptr ? password : "", sizeof(password_) - 1);
+    password_[sizeof(password_) - 1] = '\0';
+
+    DebugLog::println("Starting WiFi...");
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
+    started_ = false;
+    wasConnected_ = false;
     startConnect(millis());
 }
 
@@ -83,7 +96,7 @@ void WifiManagerSimple::startConnect(uint32_t now)
     started_ = true;
     lastConnectAttemptMs_ = now;
 
-    DebugLog::printf("WiFi connecting to SSID: %s\r\n", WifiConfig::kSsid);
+    DebugLog::printf("WiFi connecting to SSID: %s\r\n", ssid_);
     WiFi.disconnect(false);
-    WiFi.begin(WifiConfig::kSsid, WifiConfig::kPassword);
+    WiFi.begin(ssid_, password_);
 }
