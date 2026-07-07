@@ -1,9 +1,38 @@
 #include "RadarApp.h"
 
 #include <WiFi.h>
+#include <string.h>
 
 #include "DebugLog.h"
 #include "../utils/GeoUtils.h"
+
+namespace
+{
+    constexpr uint32_t kScheduleCheckIntervalMs = 5000;
+
+    const char *deviceStateName(DeviceState state)
+    {
+        switch (state)
+        {
+            case DeviceState::Boot:
+                return "Boot";
+            case DeviceState::ConnectWiFi:
+                return "ConnectWiFi";
+            case DeviceState::SetupPortal:
+                return "SetupPortal";
+            case DeviceState::Running:
+                return "Running";
+            case DeviceState::PausedBySchedule:
+                return "PausedBySchedule";
+            case DeviceState::WiFiLost:
+                return "WiFiLost";
+            case DeviceState::ApiError:
+                return "ApiError";
+            default:
+                return "Unknown";
+        }
+    }
+}
 
 RadarApp::RadarApp() :
     settingsStore_(config_),
@@ -106,7 +135,6 @@ void RadarApp::beginApiTest()
 
 void RadarApp::beginRealRadar()
 {
-    setDeviceState(DeviceState::Running);
     DebugLog::println("Starting RealRadar mode.");
     DebugLog::printf("Radar center: lat=%.5f lon=%.5f range=%.0fkm\r\n",
                      settings_.location.centerLat,
@@ -121,6 +149,10 @@ void RadarApp::beginRealRadar()
                      config_.openSkyLamax,
                      config_.openSkyLomin,
                      config_.openSkyLomax);
+    currentRealApiIntervalMs_ = activeRequestIntervalMs(settings_);
+    DebugLog::printf("RealRadar API interval: %lu ms (%s)\r\n",
+                     static_cast<unsigned long>(currentRealApiIntervalMs_),
+                     refreshPolicyName(settings_.api.refreshPolicy));
 
     AircraftModel::clearAircraft(realAircraft_, AircraftModel::kAircraftCount);
     realAircraftCount_ = 0;
@@ -132,8 +164,16 @@ void RadarApp::beginRealRadar()
         renderer_.begin();
     }
     startWifiManagerFromSettings();
-    realApiUpdater_.begin(config_, settings_, activeRequestIntervalMs(settings_));
-    renderRealRadarFrame();
+    timeManager_.begin(settings_);
+    lastScheduleCheckMs_ = 0;
+    if (updateRealRadarRunGate(millis(), true))
+    {
+        renderRealRadarFrame();
+    }
+    else
+    {
+        renderRealRadarSystemStatus();
+    }
 }
 
 void RadarApp::updateInput()
@@ -163,6 +203,10 @@ void RadarApp::updateInput()
         }
         return;
     }
+    if (inputManager_.wasSetupDisplayTogglePressed())
+    {
+        toggleSetupDisplayMode();
+    }
     if (inputManager_.wasUiSwitchPressed())
     {
         switchUiTheme();
@@ -178,6 +222,14 @@ void RadarApp::updateInput()
     if (inputManager_.wasPrintSettingsPressed())
     {
         printUserSettings(settings_);
+    }
+    if (inputManager_.wasPrintTimePressed())
+    {
+        printTimeStatus();
+    }
+    if (inputManager_.wasPrintModePressed())
+    {
+        printDeviceStateStatus();
     }
     if (inputManager_.wasResetDefaultsPressed())
     {
@@ -195,7 +247,11 @@ void RadarApp::updateInput()
         inputManager_.begin(settings_.system.uiButtonPin);
         if (config_.appMode == AppMode::RealRadar)
         {
-            renderRealRadarFrame();
+            sanitizeUserSettings(settings_);
+            timeManager_.begin(settings_);
+            stopRealRadarUpdater();
+            updateRealRadarRunGate(millis(), true);
+            renderRealRadarSystemStatus();
         }
     }
 }
@@ -207,11 +263,14 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  p: print UserSettings");
     DebugLog::println("  c: enter setup portal");
     DebugLog::println("  x: exit setup portal");
+    DebugLog::println("  q: toggle setup QR/details");
     DebugLog::println("  u: switch UI theme");
     DebugLog::println("  r: switch radar range");
     DebugLog::println("  g: toggle ground traffic");
     DebugLog::println("  s: save settings");
     DebugLog::println("  l: load settings");
+    DebugLog::println("  t: print time/schedule status");
+    DebugLog::println("  m: print device mode/state");
     DebugLog::println("  d: reset settings to default");
     DebugLog::println("  b: reboot device");
 }
@@ -255,12 +314,69 @@ void RadarApp::toggleGroundTraffic()
     settingsStore_.save(settings_);
 }
 
+void RadarApp::toggleSetupDisplayMode()
+{
+    if (deviceState_ != DeviceState::SetupPortal)
+    {
+        DebugLog::println("q ignored: not in setup portal.");
+        return;
+    }
+
+    setupDisplayMode_ = setupDisplayMode_ == SetupDisplayMode::QrCode ?
+                        SetupDisplayMode::Details :
+                        SetupDisplayMode::QrCode;
+    DebugLog::printf("Setup display mode: %s\r\n",
+                     setupDisplayMode_ == SetupDisplayMode::QrCode ? "QR" : "Details");
+    renderSetupPortalFrame(nullptr);
+}
+
 void RadarApp::resetSettingsToDefault()
 {
     settingsStore_.resetToDefault(settings_);
     DebugLog::println("User settings reset to default.");
     printUserSettings(settings_);
     settingsStore_.save(settings_);
+}
+
+void RadarApp::printTimeStatus()
+{
+    timeManager_.update();
+    char localTime[8];
+    char nextStart[8];
+    timeManager_.formatLocalTime(localTime, sizeof(localTime));
+    formatMinutesOfDay(computeNextScheduleStartMinutes(settings_.schedule,
+                                                       timeManager_.getLocalMinutesOfDay()),
+                       nextStart,
+                       sizeof(nextStart));
+
+    const int16_t localMinutes = timeManager_.getLocalMinutesOfDay();
+    DebugLog::println("Time status:");
+    DebugLog::printf("  synced=%u utc=%lu\r\n",
+                     timeManager_.isTimeSynced() ? 1 : 0,
+                     static_cast<unsigned long>(timeManager_.getUnixTime()));
+    DebugLog::printf("  local=%s minutes=%d timezoneOffset=%d\r\n",
+                     localTime,
+                     localMinutes,
+                     settings_.schedule.timezoneOffsetMinutes);
+    DebugLog::printf("  schedule enabled=%u active=%u start=%d end=%d next=%s\r\n",
+                     settings_.schedule.enabled ? 1 : 0,
+                     isWithinSchedule(settings_.schedule, localMinutes) ? 1 : 0,
+                     settings_.schedule.startMinutesOfDay,
+                     settings_.schedule.endMinutesOfDay,
+                     nextStart);
+}
+
+void RadarApp::printDeviceStateStatus()
+{
+    DebugLog::println("Device mode/status:");
+    DebugLog::printf("  appMode=%d state=%s wifi=%s\r\n",
+                     static_cast<int>(config_.appMode),
+                     deviceStateName(deviceState_),
+                     wifi_.statusText());
+    DebugLog::printf("  updater running=%u updating=%u interval=%lums\r\n",
+                     realApiUpdater_.isRunning() ? 1 : 0,
+                     realApiUpdater_.isUpdating() ? 1 : 0,
+                     static_cast<unsigned long>(currentRealApiIntervalMs_));
 }
 
 void RadarApp::enterSetupPortal(const char *reason)
@@ -273,7 +389,9 @@ void RadarApp::enterSetupPortal(const char *reason)
 
     DebugLog::printf("Entering setup portal: %s\r\n", reason != nullptr ? reason : "requested");
     realApiUpdater_.stop();
+    wifi_.stop();
     wifiManagerStarted_ = false;
+    setupDisplayMode_ = SetupDisplayMode::QrCode;
     setDeviceState(DeviceState::SetupPortal);
 
     if (!renderer_.isReady())
@@ -311,18 +429,32 @@ void RadarApp::renderSetupPortalFrame(const char *statusText)
     renderer_.renderSetupPortalFrame(configPortal_.apSsid(),
                                      configPortal_.apPassword(),
                                      configPortal_.ipAddress(),
-                                     statusText);
+                                     statusText,
+                                     setupDisplayMode_);
 }
 
-void RadarApp::setDeviceState(DeviceState state)
+void RadarApp::setDeviceState(DeviceState state, const char *reason)
 {
     if (deviceState_ == state)
     {
         return;
     }
 
+    const DeviceState previous = deviceState_;
     deviceState_ = state;
-    DebugLog::printf("Device state: %d\r\n", static_cast<int>(deviceState_));
+    if (reason != nullptr && reason[0] != '\0')
+    {
+        DebugLog::printf("DeviceState: %s -> %s (%s)\r\n",
+                         deviceStateName(previous),
+                         deviceStateName(deviceState_),
+                         reason);
+    }
+    else
+    {
+        DebugLog::printf("DeviceState: %s -> %s\r\n",
+                         deviceStateName(previous),
+                         deviceStateName(deviceState_));
+    }
 }
 
 bool RadarApp::connectToConfiguredWiFi()
@@ -339,14 +471,17 @@ bool RadarApp::connectToConfiguredWiFi()
     const uint32_t startMs = millis();
     while (!wifi_.isConnected() && millis() - startMs < 12000)
     {
-        wifi_.update(millis(), 1000);
+        wifi_.update(millis(), config_.wifiReconnectIntervalMs);
         delay(100);
     }
 
     if (!wifi_.isConnected())
     {
         setDeviceState(DeviceState::WiFiLost);
-        DebugLog::println("Configured WiFi connection failed.");
+        DebugLog::printf("Configured WiFi connection failed. status=%s ssid_len=%u password_set=%u\r\n",
+                         wifi_.statusText(),
+                         static_cast<unsigned int>(strlen(settings_.wifi.ssid)),
+                         settings_.wifi.password[0] != '\0' ? 1 : 0);
         return false;
     }
 
@@ -365,6 +500,142 @@ void RadarApp::startWifiManagerFromSettings()
 
     wifi_.begin(settings_.wifi.ssid, settings_.wifi.password);
     wifiManagerStarted_ = true;
+}
+
+bool RadarApp::updateRealRadarRunGate(uint32_t now, bool forceCheck)
+{
+    timeManager_.update();
+
+    if (!forceCheck && lastScheduleCheckMs_ != 0 && now - lastScheduleCheckMs_ < kScheduleCheckIntervalMs)
+    {
+        return deviceState_ == DeviceState::Running;
+    }
+    lastScheduleCheckMs_ = now;
+
+    if (!wifi_.isConnected())
+    {
+        stopRealRadarUpdater();
+        setDeviceState(DeviceState::WiFiLost, "WiFi lost");
+        return false;
+    }
+
+    if (settings_.schedule.enabled && !timeManager_.isTimeSynced())
+    {
+        stopRealRadarUpdater();
+        setDeviceState(DeviceState::PausedBySchedule, "time not synced");
+        if (lastTimeSyncLogMs_ == 0 || now - lastTimeSyncLogMs_ >= 10000)
+        {
+            lastTimeSyncLogMs_ = now;
+            DebugLog::println("Waiting for NTP time sync before scheduled API requests.");
+        }
+        return false;
+    }
+
+    const int16_t localMinutes = timeManager_.getLocalMinutesOfDay();
+    const bool active = isWithinSchedule(settings_.schedule, localMinutes);
+    if (!active)
+    {
+        stopRealRadarUpdater();
+        setDeviceState(DeviceState::PausedBySchedule, "schedule inactive");
+        return false;
+    }
+
+    if (deviceState_ != DeviceState::Running)
+    {
+        setDeviceState(DeviceState::Running, "schedule active");
+        DebugLog::println("Schedule active, resume API.");
+    }
+
+    ensureRealRadarUpdaterRunning();
+    return true;
+}
+
+void RadarApp::ensureRealRadarUpdaterRunning()
+{
+    const uint32_t intervalMs = activeRequestIntervalMs(settings_);
+    if (intervalMs != currentRealApiIntervalMs_)
+    {
+        currentRealApiIntervalMs_ = intervalMs;
+        DebugLog::printf("RealRadar API interval updated: %lu ms (%s)\r\n",
+                         static_cast<unsigned long>(currentRealApiIntervalMs_),
+                         refreshPolicyName(settings_.api.refreshPolicy));
+        stopRealRadarUpdater();
+    }
+
+    if (realApiUpdater_.isRunning())
+    {
+        return;
+    }
+
+    if (realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_))
+    {
+        DebugLog::printf("RealRadar API updater running, interval=%lu ms\r\n",
+                         static_cast<unsigned long>(currentRealApiIntervalMs_));
+    }
+}
+
+void RadarApp::stopRealRadarUpdater()
+{
+    if (realApiUpdater_.isRunning() || realApiUpdater_.isUpdating())
+    {
+        realApiUpdater_.stop();
+    }
+}
+
+void RadarApp::renderRealRadarSystemStatus()
+{
+    if (!renderer_.isReady())
+    {
+        return;
+    }
+
+    if (!wifi_.isConnected())
+    {
+        renderer_.renderSystemStatusFrame("WIFI LOST", "Reconnecting", "");
+        return;
+    }
+
+    if (settings_.schedule.enabled && !timeManager_.isTimeSynced())
+    {
+        renderer_.renderSystemStatusFrame("TIME SYNC", "Waiting for NTP", "");
+        return;
+    }
+
+    if (deviceState_ == DeviceState::PausedBySchedule)
+    {
+        char nextStart[8];
+        char line3[24];
+        formatMinutesOfDay(computeNextScheduleStartMinutes(settings_.schedule,
+                                                           timeManager_.getLocalMinutesOfDay()),
+                           nextStart,
+                           sizeof(nextStart));
+        snprintf(line3, sizeof(line3), "Next: %s", nextStart);
+        renderer_.renderSystemStatusFrame("PAUSED", "Outside schedule", line3);
+        return;
+    }
+
+    renderer_.renderSystemStatusFrame("STATUS", realRadarStatus_, "");
+}
+
+void RadarApp::formatMinutesOfDay(int16_t minutes, char *buffer, size_t bufferSize) const
+{
+    if (buffer == nullptr || bufferSize == 0)
+    {
+        return;
+    }
+
+    if (minutes < 0)
+    {
+        snprintf(buffer, bufferSize, "--:--");
+        return;
+    }
+
+    minutes %= 24 * 60;
+    if (minutes < 0)
+    {
+        minutes += 24 * 60;
+    }
+    snprintf(buffer, bufferSize, "%02d:%02d", minutes / 60, minutes % 60);
 }
 
 void RadarApp::updateRadarDemo(uint32_t now)
@@ -433,16 +704,29 @@ void RadarApp::updateRealRadar(uint32_t now)
         if (wifiLostSinceMs_ == 0)
         {
             wifiLostSinceMs_ = now;
+            stopRealRadarUpdater();
+            setDeviceState(DeviceState::WiFiLost, "WiFi lost");
+            renderRealRadarSystemStatus();
         }
-        else if (now - wifiLostSinceMs_ > 30000)
-        {
-            enterSetupPortal("WiFi lost");
-            return;
-        }
+        return;
     }
-    else
+
+    if (wifiLostSinceMs_ != 0 || deviceState_ == DeviceState::WiFiLost)
     {
         wifiLostSinceMs_ = 0;
+        DebugLog::println("WiFi reconnected, restarting time sync and schedule check.");
+        timeManager_.begin(settings_);
+        lastScheduleCheckMs_ = 0;
+    }
+
+    if (!updateRealRadarRunGate(now, false))
+    {
+        if (now - lastFrameMs_ >= config_.frameIntervalMs)
+        {
+            lastFrameMs_ = now;
+            renderRealRadarSystemStatus();
+        }
+        return;
     }
 
     OpenSkySnapshot snapshot;

@@ -14,6 +14,7 @@
 #include "ConfigPortal.h"
 #include "InputManager.h"
 #include "SettingsStore.h"
+#include "TimeManager.h"
 #include "UserSettings.h"
 #include "WifiManagerSimple.h"
 
@@ -34,6 +35,7 @@ private:
     TFT_eSPI tft_;
     FakeDataProvider dataProvider_;
     RadarRenderer renderer_;
+    TimeManager timeManager_;
     WifiManagerSimple wifi_;
     OpenSkyProvider openSky_;
     OpenSkyAsyncUpdater realApiUpdater_;
@@ -43,6 +45,7 @@ private:
     uint8_t realAircraftCount_ = 0;
     char realRadarStatus_[32] = "LIVE WAIT";
     DeviceState deviceState_ = DeviceState::Boot;
+    SetupDisplayMode setupDisplayMode_ = SetupDisplayMode::QrCode;
     bool wifiManagerStarted_ = false;
 
     uint8_t selectedAircraftIndex_ = 0;
@@ -53,7 +56,10 @@ private:
     uint32_t lastApiScreenMs_ = 0;
     uint32_t lastApiSerialMs_ = 0;
     uint32_t lastPredictionSummaryMs_ = 0;
+    uint32_t lastScheduleCheckMs_ = 0;
+    uint32_t lastTimeSyncLogMs_ = 0;
     uint32_t wifiLostSinceMs_ = 0;
+    uint32_t currentRealApiIntervalMs_ = 0;
 
     void beginConfiguredMode();
     void beginRadarDemo();
@@ -64,14 +70,22 @@ private:
     void switchUiTheme();
     void switchRange();
     void toggleGroundTraffic();
+    void toggleSetupDisplayMode();
     void resetSettingsToDefault();
+    void printTimeStatus();
+    void printDeviceStateStatus();
     void enterSetupPortal(const char *reason);
     void exitSetupPortal();
     void updateSetupPortal(uint32_t now);
     void renderSetupPortalFrame(const char *statusText);
-    void setDeviceState(DeviceState state);
+    void setDeviceState(DeviceState state, const char *reason = nullptr);
     bool connectToConfiguredWiFi();
     void startWifiManagerFromSettings();
+    bool updateRealRadarRunGate(uint32_t now, bool forceCheck);
+    void ensureRealRadarUpdaterRunning();
+    void stopRealRadarUpdater();
+    void renderRealRadarSystemStatus();
+    void formatMinutesOfDay(int16_t minutes, char *buffer, size_t bufferSize) const;
     void updateRadarDemo(uint32_t now);
     void updateApiTest(uint32_t now);
     void updateRealRadar(uint32_t now);

@@ -25,7 +25,8 @@ enum class ApiAccountMode
     Anonymous,
     StandardUser,
     ActiveFeeder,
-    CustomBudget
+    CustomBudget,
+    OpenSkyClient
 };
 
 enum class RefreshPolicy
@@ -71,6 +72,8 @@ struct ApiSettings
 
     char openSkyUsername[64];
     char openSkyPassword[64];
+    char openSkyClientId[96];
+    char openSkyClientSecret[128];
 
     uint32_t dailyCreditBudget;
     float creditReserveRatio;
@@ -140,7 +143,10 @@ void loadDefaultUserSettings(UserSettings &settings);
 void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config);
 bool validateUserSettings(const UserSettings &settings);
 void sanitizeUserSettings(UserSettings &settings);
+void updateQueryBoxFromCenterRange(UserSettings &settings);
 uint32_t computeActiveSecondsPerDay(const ScheduleSettings &schedule);
+bool isWithinSchedule(const ScheduleSettings &schedule, int16_t localMinutesOfDay);
+int16_t computeNextScheduleStartMinutes(const ScheduleSettings &schedule, int16_t localMinutesOfDay);
 uint32_t computeRecommendedRequestIntervalMs(const UserSettings &settings);
 uint32_t activeRequestIntervalMs(const UserSettings &settings);
 void printUserSettings(const UserSettings &settings);

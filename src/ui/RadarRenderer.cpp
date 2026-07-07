@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "../app/DebugLog.h"
+#include "QrCodeRenderer.h"
 
 RadarRenderer::RadarRenderer(TFT_eSPI &display) :
     tft_(display),
@@ -121,7 +122,8 @@ void RadarRenderer::advanceSweep(float stepDeg)
 void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
                                            const char *apPassword,
                                            const char *ipAddress,
-                                           const char *statusText)
+                                           const char *statusText,
+                                           SetupDisplayMode mode)
 {
     if (!frameBufferReady_)
     {
@@ -132,6 +134,39 @@ void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
     frame_.drawCircle(kCenterX, kCenterY, 116, radarGreen_);
     frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
     frame_.drawCircle(kCenterX, kCenterY, 40, dimGreen_);
+
+    if (mode == SetupDisplayMode::QrCode)
+    {
+        frame_.setTextDatum(MC_DATUM);
+        frame_.setTextColor(sweepGreen_, TFT_BLACK);
+        frame_.drawString("SETUP", kCenterX, 28, 2);
+
+        const bool qrOk = QrCodeRenderer::drawWifiQr(frame_,
+                                                     apSsid,
+                                                     apPassword,
+                                                     kCenterX,
+                                                     46,
+                                                     152);
+
+        frame_.setTextDatum(MC_DATUM);
+        frame_.setTextColor(labelGreen_, TFT_BLACK);
+        if (qrOk)
+        {
+            frame_.drawString(statusText != nullptr && statusText[0] != '\0' ? statusText : "Scan to connect",
+                              kCenterX,
+                              204,
+                              1);
+            frame_.drawString(ipAddress != nullptr ? ipAddress : "192.168.4.1", kCenterX, 218, 1);
+        }
+        else
+        {
+            frame_.drawString("QR payload too long", kCenterX, 110, 1);
+            frame_.drawString("Press q for details", kCenterX, 126, 1);
+        }
+
+        frame_.pushSprite(0, 0);
+        return;
+    }
 
     frame_.setTextDatum(MC_DATUM);
     frame_.setTextColor(sweepGreen_, TFT_BLACK);
@@ -156,6 +191,39 @@ void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
     {
         frame_.setTextColor(labelGreen_, TFT_BLACK);
         frame_.drawString(statusText, kCenterX, 204, 1);
+    }
+
+    frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::renderSystemStatusFrame(const char *line1,
+                                            const char *line2,
+                                            const char *line3)
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    frame_.fillSprite(TFT_BLACK);
+    frame_.drawCircle(kCenterX, kCenterY, 116, radarGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 40, dimGreen_);
+    frame_.drawLine(kCenterX - 80, kCenterY, kCenterX + 80, kCenterY, dimGreen_);
+    frame_.drawLine(kCenterX, kCenterY - 80, kCenterX, kCenterY + 80, dimGreen_);
+
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(sweepGreen_, TFT_BLACK);
+    frame_.drawString(line1 != nullptr ? line1 : "STATUS", kCenterX, 96, 2);
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    if (line2 != nullptr && line2[0] != '\0')
+    {
+        frame_.drawString(line2, kCenterX, 124, 1);
+    }
+    if (line3 != nullptr && line3[0] != '\0')
+    {
+        frame_.drawString(line3, kCenterX, 140, 1);
     }
 
     frame_.pushSprite(0, 0);

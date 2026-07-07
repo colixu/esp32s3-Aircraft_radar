@@ -93,6 +93,8 @@ bool SettingsStore::load(UserSettings &settings)
     settings.api.minUsefulIntervalMs = preferences_.getUInt("minint", settings.api.minUsefulIntervalMs);
     getString(preferences_, "osuser", settings.api.openSkyUsername, sizeof(settings.api.openSkyUsername));
     getString(preferences_, "ospass", settings.api.openSkyPassword, sizeof(settings.api.openSkyPassword));
+    getString(preferences_, "oscid", settings.api.openSkyClientId, sizeof(settings.api.openSkyClientId));
+    getString(preferences_, "oscsec", settings.api.openSkyClientSecret, sizeof(settings.api.openSkyClientSecret));
 
     settings.schedule.enabled = preferences_.getBool("sch", settings.schedule.enabled);
     settings.schedule.startMinutesOfDay = preferences_.getShort("start", settings.schedule.startMinutesOfDay);
@@ -167,6 +169,8 @@ bool SettingsStore::save(const UserSettings &settings)
     preferences_.putUInt("minint", settings.api.minUsefulIntervalMs);
     preferences_.putString("osuser", settings.api.openSkyUsername);
     preferences_.putString("ospass", settings.api.openSkyPassword);
+    preferences_.putString("oscid", settings.api.openSkyClientId);
+    preferences_.putString("oscsec", settings.api.openSkyClientSecret);
 
     preferences_.putBool("sch", settings.schedule.enabled);
     preferences_.putShort("start", settings.schedule.startMinutesOfDay);

@@ -19,6 +19,10 @@ void WifiManagerSimple::begin(const char *ssid, const char *password)
     password_[sizeof(password_) - 1] = '\0';
 
     DebugLog::println("Starting WiFi...");
+    WiFi.persistent(false);
+    WiFi.disconnect(true, true);
+    WiFi.mode(WIFI_OFF);
+    delay(150);
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
     started_ = false;
@@ -50,6 +54,21 @@ void WifiManagerSimple::update(uint32_t now, uint32_t reconnectIntervalMs)
     {
         startConnect(now);
     }
+}
+
+void WifiManagerSimple::stop()
+{
+    if (!started_ && !wasConnected_)
+    {
+        return;
+    }
+
+    DebugLog::println("Stopping WiFi STA connection.");
+    WiFi.disconnect(true, true);
+    WiFi.mode(WIFI_OFF);
+    started_ = false;
+    wasConnected_ = false;
+    lastConnectAttemptMs_ = 0;
 }
 
 bool WifiManagerSimple::isConnected() const
@@ -96,7 +115,11 @@ void WifiManagerSimple::startConnect(uint32_t now)
     started_ = true;
     lastConnectAttemptMs_ = now;
 
-    DebugLog::printf("WiFi connecting to SSID: %s\r\n", ssid_);
+    DebugLog::printf("WiFi connecting to SSID: %s status=%d pass_set=%u\r\n",
+                     ssid_,
+                     static_cast<int>(WiFi.status()),
+                     password_[0] != '\0' ? 1 : 0);
     WiFi.disconnect(false);
+    delay(50);
     WiFi.begin(ssid_, password_);
 }

@@ -8,6 +8,7 @@ public:
     void begin();
     void begin(const char *ssid, const char *password);
     void update(uint32_t now, uint32_t reconnectIntervalMs);
+    void stop();
 
     bool isConnected() const;
     const char *statusText() const;

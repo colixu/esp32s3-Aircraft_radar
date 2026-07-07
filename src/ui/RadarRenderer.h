@@ -6,6 +6,12 @@
 #include "../app/AppConfig.h"
 #include "../app/UserSettings.h"
 
+enum class SetupDisplayMode
+{
+    QrCode,
+    Details
+};
+
 class RadarRenderer
 {
 public:
@@ -23,7 +29,11 @@ public:
     void renderSetupPortalFrame(const char *apSsid,
                                 const char *apPassword,
                                 const char *ipAddress,
-                                const char *statusText);
+                                const char *statusText,
+                                SetupDisplayMode mode);
+    void renderSystemStatusFrame(const char *line1,
+                                 const char *line2,
+                                 const char *line3);
 
 private:
     static constexpr int16_t kCenterX = 120;

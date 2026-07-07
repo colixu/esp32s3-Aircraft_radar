@@ -9,7 +9,8 @@ bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &set
 {
     if (taskHandle_ != nullptr)
     {
-        return true;
+        requestIntervalMs_ = requestIntervalMs;
+        return !stopRequested_;
     }
 
     config_ = config;
@@ -48,6 +49,13 @@ bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &set
 
 void OpenSkyAsyncUpdater::stop()
 {
+    if (taskHandle_ == nullptr)
+    {
+        running_ = false;
+        updating_ = false;
+        stopRequested_ = false;
+        return;
+    }
     stopRequested_ = true;
 }
 

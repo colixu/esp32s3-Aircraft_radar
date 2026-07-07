@@ -1,5 +1,6 @@
 #include "UserSettings.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "../aircraft/AircraftModel.h"
@@ -42,7 +43,8 @@ namespace
         return mode == ApiAccountMode::Anonymous ||
                mode == ApiAccountMode::StandardUser ||
                mode == ApiAccountMode::ActiveFeeder ||
-               mode == ApiAccountMode::CustomBudget;
+               mode == ApiAccountMode::CustomBudget ||
+               mode == ApiAccountMode::OpenSkyClient;
     }
 
     bool isValidRefreshPolicy(RefreshPolicy policy)
@@ -58,6 +60,7 @@ namespace
             case ApiAccountMode::Anonymous:
                 return 400;
             case ApiAccountMode::StandardUser:
+            case ApiAccountMode::OpenSkyClient:
                 return 4000;
             case ApiAccountMode::ActiveFeeder:
                 return 8000;
@@ -213,6 +216,23 @@ void sanitizeUserSettings(UserSettings &settings)
     settings.api.computedRequestIntervalMs = computeRecommendedRequestIntervalMs(settings);
 }
 
+void updateQueryBoxFromCenterRange(UserSettings &settings)
+{
+    settings.location.centerLat = clampValue(settings.location.centerLat, -90.0f, 90.0f);
+    settings.location.centerLon = clampValue(settings.location.centerLon, -180.0f, 180.0f);
+    settings.location.maxRangeKm = clampValue(settings.location.maxRangeKm, 5.0f, 300.0f);
+
+    const float latDelta = settings.location.maxRangeKm / 111.32f;
+    const float latRadians = settings.location.centerLat * DEG_TO_RAD;
+    const float cosLat = max(0.05f, fabsf(cosf(latRadians)));
+    const float lonDelta = settings.location.maxRangeKm / (111.32f * cosLat);
+
+    settings.location.queryLatMin = clampValue(settings.location.centerLat - latDelta, -90.0f, 90.0f);
+    settings.location.queryLatMax = clampValue(settings.location.centerLat + latDelta, -90.0f, 90.0f);
+    settings.location.queryLonMin = clampValue(settings.location.centerLon - lonDelta, -180.0f, 180.0f);
+    settings.location.queryLonMax = clampValue(settings.location.centerLon + lonDelta, -180.0f, 180.0f);
+}
+
 uint32_t computeActiveSecondsPerDay(const ScheduleSettings &schedule)
 {
     if (!schedule.enabled || schedule.startMinutesOfDay == schedule.endMinutesOfDay)
@@ -227,6 +247,51 @@ uint32_t computeActiveSecondsPerDay(const ScheduleSettings &schedule)
     }
 
     return static_cast<uint32_t>(minutes) * 60UL;
+}
+
+bool isWithinSchedule(const ScheduleSettings &schedule, int16_t localMinutesOfDay)
+{
+    if (!schedule.enabled || schedule.startMinutesOfDay == schedule.endMinutesOfDay)
+    {
+        return true;
+    }
+
+    if (localMinutesOfDay < 0)
+    {
+        return false;
+    }
+
+    const int16_t minute = localMinutesOfDay % (24 * 60);
+    const int16_t start = schedule.startMinutesOfDay;
+    const int16_t end = schedule.endMinutesOfDay;
+
+    if (end > start)
+    {
+        return minute >= start && minute < end;
+    }
+
+    return minute >= start || minute < end;
+}
+
+int16_t computeNextScheduleStartMinutes(const ScheduleSettings &schedule, int16_t localMinutesOfDay)
+{
+    if (!schedule.enabled || schedule.startMinutesOfDay == schedule.endMinutesOfDay)
+    {
+        return -1;
+    }
+
+    if (localMinutesOfDay < 0)
+    {
+        return schedule.startMinutesOfDay;
+    }
+
+    const int16_t minute = localMinutesOfDay % (24 * 60);
+    if (isWithinSchedule(schedule, minute))
+    {
+        return -1;
+    }
+
+    return schedule.startMinutesOfDay;
 }
 
 uint32_t computeRecommendedRequestIntervalMs(const UserSettings &settings)
@@ -256,32 +321,36 @@ uint32_t activeRequestIntervalMs(const UserSettings &settings)
 
 void printUserSettings(const UserSettings &settings)
 {
-    DebugLog::println("[WiFi]");
+    DebugLog::println("[User]");
     DebugLog::printf("  configured=%u ssid_set=%u\r\n",
                      settings.wifi.configured ? 1 : 0,
                      settings.wifi.ssid[0] != '\0' ? 1 : 0);
-    DebugLog::println("[Display]");
-    DebugLog::printf("  uiTheme=%s maxAircraft=%u labels=%u brightness=%u\r\n",
-                     uiThemeName(settings.display.uiTheme),
-                     settings.display.maxAircraftToDisplay,
-                     settings.display.showLabels ? 1 : 0,
-                     settings.display.brightness);
-    DebugLog::println("[Location]");
     DebugLog::printf("  center=%.5f,%.5f range=%.0fkm\r\n",
                      settings.location.centerLat,
                      settings.location.centerLon,
                      settings.location.maxRangeKm);
-    DebugLog::printf("  bbox lat %.4f..%.4f lon %.4f..%.4f\r\n",
+    DebugLog::printf("  api=%s account=%s client_id_set=%u client_secret_set=%u\r\n",
+                     apiProviderName(settings.api.provider),
+                     apiAccountModeName(settings.api.accountMode),
+                     settings.api.openSkyClientId[0] != '\0' ? 1 : 0,
+                     settings.api.openSkyClientSecret[0] != '\0' ? 1 : 0);
+    DebugLog::printf("  schedule=%u start=%d end=%d tz=%d theme=%s brightness=%u\r\n",
+                     settings.schedule.enabled ? 1 : 0,
+                     settings.schedule.startMinutesOfDay,
+                     settings.schedule.endMinutesOfDay,
+                     settings.schedule.timezoneOffsetMinutes,
+                     uiThemeName(settings.display.uiTheme),
+                     settings.display.brightness);
+    DebugLog::println("[Advanced]");
+    DebugLog::printf("  bbox lat %.4f..%.4f lon %.4f..%.4f labels=%u maxAircraft=%u\r\n",
                      settings.location.queryLatMin,
                      settings.location.queryLatMax,
                      settings.location.queryLonMin,
-                     settings.location.queryLonMax);
-    DebugLog::println("[API]");
-    DebugLog::printf("  provider=%s account=%s policy=%s\r\n",
-                     apiProviderName(settings.api.provider),
-                     apiAccountModeName(settings.api.accountMode),
-                     refreshPolicyName(settings.api.refreshPolicy));
-    DebugLog::printf("  budget=%lu reserve=%.2f cost=%.1f min=%lums manual=%lums computed=%lums active=%lums\r\n",
+                     settings.location.queryLonMax,
+                     settings.display.showLabels ? 1 : 0,
+                     settings.display.maxAircraftToDisplay);
+    DebugLog::printf("  refresh policy=%s budget=%lu reserve=%.2f cost=%.1f min=%lums manual=%lums computed=%lums active=%lums\r\n",
+                     refreshPolicyName(settings.api.refreshPolicy),
                      static_cast<unsigned long>(settings.api.dailyCreditBudget),
                      settings.api.creditReserveRatio,
                      settings.api.requestCostCredits,
@@ -289,19 +358,10 @@ void printUserSettings(const UserSettings &settings)
                      static_cast<unsigned long>(settings.api.manualRequestIntervalMs),
                      static_cast<unsigned long>(settings.api.computedRequestIntervalMs),
                      static_cast<unsigned long>(activeRequestIntervalMs(settings)));
-    DebugLog::println("[Schedule]");
-    DebugLog::printf("  enabled=%u start=%d end=%d tz=%d activeSeconds=%lu\r\n",
-                     settings.schedule.enabled ? 1 : 0,
-                     settings.schedule.startMinutesOfDay,
-                     settings.schedule.endMinutesOfDay,
-                     settings.schedule.timezoneOffsetMinutes,
-                     static_cast<unsigned long>(computeActiveSecondsPerDay(settings.schedule)));
-    DebugLog::println("[Filter]");
     DebugLog::printf("  ground=%u minAlt=%.0f minSpeed=%.1f\r\n",
                      settings.filter.showGroundTraffic ? 1 : 0,
                      settings.filter.minAirborneAltitudeM,
                      settings.filter.minAirborneSpeedMs);
-    DebugLog::println("[Prediction]");
     DebugLog::printf("  enabled=%u alpha=%.2f max=%lums jump=%.1fkm lowSpeed=%.1f stale=%lums\r\n",
                      settings.prediction.enabled ? 1 : 0,
                      settings.prediction.followAlpha,
@@ -314,7 +374,6 @@ void printUserSettings(const UserSettings &settings)
                      static_cast<unsigned long>(settings.prediction.correctionMinApiIntervalMs),
                      static_cast<unsigned long>(settings.prediction.correctionDurationMs),
                      settings.prediction.correctionStartDistanceKm);
-    DebugLog::println("[System]");
     DebugLog::printf("  uiButtonPin=%d serialDebug=%u\r\n",
                      settings.system.uiButtonPin,
                      settings.system.serialDebug ? 1 : 0);
@@ -366,6 +425,8 @@ const char *apiAccountModeName(ApiAccountMode mode)
             return "ActiveFeeder";
         case ApiAccountMode::CustomBudget:
             return "CustomBudget";
+        case ApiAccountMode::OpenSkyClient:
+            return "OpenSkyClient";
         default:
             return "Unknown";
     }

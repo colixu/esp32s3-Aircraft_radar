@@ -14,9 +14,12 @@ public:
     bool wasResetDefaultsPressed();
     bool wasSaveSettingsPressed();
     bool wasLoadSettingsPressed();
+    bool wasPrintTimePressed();
+    bool wasPrintModePressed();
     bool wasHelpPressed();
     bool wasConfigPortalPressed();
     bool wasExitConfigPortalPressed();
+    bool wasSetupDisplayTogglePressed();
     bool wasRebootPressed();
 
 private:
@@ -28,8 +31,11 @@ private:
     bool resetDefaultsPressed_ = false;
     bool saveSettingsPressed_ = false;
     bool loadSettingsPressed_ = false;
+    bool printTimePressed_ = false;
+    bool printModePressed_ = false;
     bool helpPressed_ = false;
     bool configPortalPressed_ = false;
     bool exitConfigPortalPressed_ = false;
+    bool setupDisplayTogglePressed_ = false;
     bool rebootPressed_ = false;
 };

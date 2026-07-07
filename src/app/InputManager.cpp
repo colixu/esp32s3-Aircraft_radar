@@ -43,6 +43,14 @@ void InputManager::update()
         {
             loadSettingsPressed_ = true;
         }
+        else if (command == 't' || command == 'T')
+        {
+            printTimePressed_ = true;
+        }
+        else if (command == 'm' || command == 'M')
+        {
+            printModePressed_ = true;
+        }
         else if (command == 'h' || command == 'H')
         {
             helpPressed_ = true;
@@ -54,6 +62,10 @@ void InputManager::update()
         else if (command == 'x' || command == 'X')
         {
             exitConfigPortalPressed_ = true;
+        }
+        else if (command == 'q' || command == 'Q')
+        {
+            setupDisplayTogglePressed_ = true;
         }
         else if (command == 'b' || command == 'B')
         {
@@ -113,6 +125,20 @@ bool InputManager::wasLoadSettingsPressed()
     return pressed;
 }
 
+bool InputManager::wasPrintTimePressed()
+{
+    const bool pressed = printTimePressed_;
+    printTimePressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasPrintModePressed()
+{
+    const bool pressed = printModePressed_;
+    printModePressed_ = false;
+    return pressed;
+}
+
 bool InputManager::wasHelpPressed()
 {
     const bool pressed = helpPressed_;
@@ -131,6 +157,13 @@ bool InputManager::wasExitConfigPortalPressed()
 {
     const bool pressed = exitConfigPortalPressed_;
     exitConfigPortalPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasSetupDisplayTogglePressed()
+{
+    const bool pressed = setupDisplayTogglePressed_;
+    setupDisplayTogglePressed_ = false;
     return pressed;
 }
 
