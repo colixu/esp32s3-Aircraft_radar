@@ -68,6 +68,7 @@ private:
     void beginApiTest();
     void beginRealRadar();
     void updateInput();
+    void handleInputEvent(InputEvent event);
     void printSerialHelp();
     void switchUiTheme();
     void switchRange();

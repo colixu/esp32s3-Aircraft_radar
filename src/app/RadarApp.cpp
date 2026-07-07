@@ -50,7 +50,7 @@ void RadarApp::begin()
     DebugLog::println("ESP32-S3 GC9A01 aircraft radar");
     settingsStore_.begin();
     settingsStore_.load(settings_);
-    inputManager_.begin(settings_.system.uiButtonPin);
+    inputManager_.begin(settings_);
     printSerialHelp();
     beginConfiguredMode();
 }
@@ -192,95 +192,108 @@ void RadarApp::updateInput()
 {
     inputManager_.update();
 
-    if (inputManager_.wasHelpPressed())
+    InputEvent event = InputEvent::None;
+    while (inputManager_.popEvent(event))
     {
-        printSerialHelp();
+        handleInputEvent(event);
     }
-    if (inputManager_.wasRebootPressed())
+}
+
+void RadarApp::handleInputEvent(InputEvent event)
+{
+    switch (event)
     {
-        DebugLog::println("Reboot requested from serial.");
-        delay(100);
-        ESP.restart();
-    }
-    if (inputManager_.wasConfigPortalPressed())
-    {
-        enterSetupPortal("Serial command");
-        return;
-    }
-    if (inputManager_.wasExitConfigPortalPressed())
-    {
-        if (deviceState_ == DeviceState::SetupPortal)
-        {
-            exitSetupPortal();
-        }
-        else if (staSettingsOverlayVisible_)
-        {
-            hideStaSettingsOverlay();
-        }
-        return;
-    }
-    if (inputManager_.wasStaSettingsPressed())
-    {
-        showStaSettingsOverlay();
-    }
-    if (inputManager_.wasSetupDisplayTogglePressed())
-    {
-        toggleSetupDisplayMode();
-    }
-    if (inputManager_.wasUiSwitchPressed())
-    {
-        switchUiTheme();
-    }
-    if (inputManager_.wasRangeSwitchPressed())
-    {
-        switchRange();
-    }
-    if (inputManager_.wasGroundTogglePressed())
-    {
-        toggleGroundTraffic();
-    }
-    if (inputManager_.wasPrintSettingsPressed())
-    {
-        printUserSettings(settings_);
-    }
-    if (inputManager_.wasPrintTimePressed())
-    {
-        printTimeStatus();
-    }
-    if (inputManager_.wasPrintModePressed())
-    {
-        printDeviceStateStatus();
-    }
-    if (inputManager_.wasPrintApiAuthPressed())
-    {
-        printApiAuthStatus();
-    }
-    if (inputManager_.wasClearAuthTokenPressed())
-    {
-        clearAuthToken();
-    }
-    if (inputManager_.wasResetDefaultsPressed())
-    {
-        resetSettingsToDefault();
-    }
-    if (inputManager_.wasSaveSettingsPressed())
-    {
-        DebugLog::println("Manual settings save requested.");
-        settingsStore_.save(settings_);
-    }
-    if (inputManager_.wasLoadSettingsPressed())
-    {
-        DebugLog::println("Manual settings load requested.");
-        settingsStore_.load(settings_);
-        inputManager_.begin(settings_.system.uiButtonPin);
-        if (config_.appMode == AppMode::RealRadar)
-        {
-            sanitizeUserSettings(settings_);
-            timeManager_.begin(settings_);
-            stopRealRadarUpdater();
-            updateRealRadarRunGate(millis(), true);
-            renderRealRadarSystemStatus();
-        }
+        case InputEvent::ShowHelp:
+            printSerialHelp();
+            break;
+
+        case InputEvent::PrintSettings:
+            printUserSettings(settings_);
+            break;
+
+        case InputEvent::EnterApSetup:
+            enterSetupPortal("Serial command");
+            break;
+
+        case InputEvent::ShowStaSettings:
+            showStaSettingsOverlay();
+            break;
+
+        case InputEvent::ToggleSettingsDisplay:
+            toggleSetupDisplayMode();
+            break;
+
+        case InputEvent::ExitCurrentView:
+            if (deviceState_ == DeviceState::SetupPortal)
+            {
+                exitSetupPortal();
+            }
+            else if (staSettingsOverlayVisible_)
+            {
+                hideStaSettingsOverlay();
+            }
+            break;
+
+        case InputEvent::NextUiTheme:
+            switchUiTheme();
+            break;
+
+        case InputEvent::SwitchRange:
+            switchRange();
+            break;
+
+        case InputEvent::ToggleGroundTraffic:
+            toggleGroundTraffic();
+            break;
+
+        case InputEvent::SaveSettings:
+            DebugLog::println("Manual settings save requested.");
+            settingsStore_.save(settings_);
+            break;
+
+        case InputEvent::LoadSettings:
+            DebugLog::println("Manual settings load requested.");
+            settingsStore_.load(settings_);
+            inputManager_.begin(settings_);
+            if (config_.appMode == AppMode::RealRadar)
+            {
+                sanitizeUserSettings(settings_);
+                timeManager_.begin(settings_);
+                stopRealRadarUpdater();
+                updateRealRadarRunGate(millis(), true);
+                renderRealRadarSystemStatus();
+            }
+            break;
+
+        case InputEvent::ResetDefaults:
+            resetSettingsToDefault();
+            break;
+
+        case InputEvent::PrintTimeStatus:
+            printTimeStatus();
+            break;
+
+        case InputEvent::PrintDeviceStatus:
+            printDeviceStateStatus();
+            break;
+
+        case InputEvent::PrintApiAuthStatus:
+            printApiAuthStatus();
+            break;
+
+        case InputEvent::ClearAuthToken:
+            clearAuthToken();
+            break;
+
+        case InputEvent::Reboot:
+            DebugLog::println("Reboot requested from serial.");
+            delay(100);
+            ESP.restart();
+            break;
+
+        case InputEvent::None:
+        default:
+            break;
     }
 }
 

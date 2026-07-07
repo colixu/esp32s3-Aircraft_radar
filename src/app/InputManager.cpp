@@ -1,8 +1,21 @@
 #include "InputManager.h"
 
-void InputManager::begin(int buttonPin)
+#include "DebugLog.h"
+
+namespace
 {
-    buttonPin_ = buttonPin;
+    bool isIgnoredSerialChar(char command)
+    {
+        return command == '\r' || command == '\n' || command == ' ' || command == '\t';
+    }
+}
+
+void InputManager::begin(const UserSettings &settings)
+{
+    buttonPin_ = settings.system.uiButtonPin;
+    eventHead_ = 0;
+    eventTail_ = 0;
+    eventCount_ = 0;
 
     if (buttonPin_ >= 0)
     {
@@ -14,195 +27,147 @@ void InputManager::update()
 {
     while (Serial0.available() > 0)
     {
-        const char command = static_cast<char>(Serial0.read());
-        if (command == 'u' || command == 'U')
-        {
-            uiSwitchPressed_ = true;
-        }
-        else if (command == 'r' || command == 'R')
-        {
-            rangeSwitchPressed_ = true;
-        }
-        else if (command == 'g' || command == 'G')
-        {
-            groundTogglePressed_ = true;
-        }
-        else if (command == 'p' || command == 'P')
-        {
-            printSettingsPressed_ = true;
-        }
-        else if (command == 'd' || command == 'D')
-        {
-            resetDefaultsPressed_ = true;
-        }
-        else if (command == 's' || command == 'S')
-        {
-            saveSettingsPressed_ = true;
-        }
-        else if (command == 'l' || command == 'L')
-        {
-            loadSettingsPressed_ = true;
-        }
-        else if (command == 't' || command == 'T')
-        {
-            printTimePressed_ = true;
-        }
-        else if (command == 'm' || command == 'M')
-        {
-            printModePressed_ = true;
-        }
-        else if (command == 'w' || command == 'W')
-        {
-            staSettingsPressed_ = true;
-        }
-        else if (command == 'a')
-        {
-            printApiAuthPressed_ = true;
-        }
-        else if (command == 'A')
-        {
-            clearAuthTokenPressed_ = true;
-        }
-        else if (command == 'h' || command == 'H')
-        {
-            helpPressed_ = true;
-        }
-        else if (command == 'c' || command == 'C')
-        {
-            configPortalPressed_ = true;
-        }
-        else if (command == 'x' || command == 'X')
-        {
-            exitConfigPortalPressed_ = true;
-        }
-        else if (command == 'q' || command == 'Q')
-        {
-            setupDisplayTogglePressed_ = true;
-        }
-        else if (command == 'b' || command == 'B')
-        {
-            rebootPressed_ = true;
-        }
+        handleSerialCommand(static_cast<char>(Serial0.read()));
     }
 
-    // Hardware button support is intentionally reserved for a later pass.
+    updateButtons();
 }
 
-bool InputManager::wasUiSwitchPressed()
+bool InputManager::popEvent(InputEvent &event)
 {
-    const bool pressed = uiSwitchPressed_;
-    uiSwitchPressed_ = false;
-    return pressed;
+    if (eventCount_ == 0)
+    {
+        event = InputEvent::None;
+        return false;
+    }
+
+    event = eventQueue_[eventTail_];
+    eventTail_ = (eventTail_ + 1) % kEventQueueSize;
+    --eventCount_;
+    return true;
 }
 
-bool InputManager::wasRangeSwitchPressed()
+void InputManager::pushEvent(InputEvent event)
 {
-    const bool pressed = rangeSwitchPressed_;
-    rangeSwitchPressed_ = false;
-    return pressed;
+    if (event == InputEvent::None)
+    {
+        return;
+    }
+
+    if (eventCount_ >= kEventQueueSize)
+    {
+        DebugLog::println("InputManager: event queue full, dropping input event.");
+        return;
+    }
+
+    eventQueue_[eventHead_] = event;
+    eventHead_ = (eventHead_ + 1) % kEventQueueSize;
+    ++eventCount_;
 }
 
-bool InputManager::wasGroundTogglePressed()
+void InputManager::handleSerialCommand(char command)
 {
-    const bool pressed = groundTogglePressed_;
-    groundTogglePressed_ = false;
-    return pressed;
+    if (isIgnoredSerialChar(command))
+    {
+        return;
+    }
+
+    switch (command)
+    {
+        case 'h':
+        case 'H':
+            pushEvent(InputEvent::ShowHelp);
+            break;
+
+        case 'p':
+        case 'P':
+            pushEvent(InputEvent::PrintSettings);
+            break;
+
+        case 'c':
+        case 'C':
+            pushEvent(InputEvent::EnterApSetup);
+            break;
+
+        case 'w':
+        case 'W':
+            pushEvent(InputEvent::ShowStaSettings);
+            break;
+
+        case 'q':
+        case 'Q':
+            pushEvent(InputEvent::ToggleSettingsDisplay);
+            break;
+
+        case 'x':
+        case 'X':
+            pushEvent(InputEvent::ExitCurrentView);
+            break;
+
+        case 'u':
+        case 'U':
+            pushEvent(InputEvent::NextUiTheme);
+            break;
+
+        case 'r':
+        case 'R':
+            pushEvent(InputEvent::SwitchRange);
+            break;
+
+        case 'g':
+        case 'G':
+            pushEvent(InputEvent::ToggleGroundTraffic);
+            break;
+
+        case 's':
+        case 'S':
+            pushEvent(InputEvent::SaveSettings);
+            break;
+
+        case 'l':
+        case 'L':
+            pushEvent(InputEvent::LoadSettings);
+            break;
+
+        case 'd':
+        case 'D':
+            pushEvent(InputEvent::ResetDefaults);
+            break;
+
+        case 't':
+        case 'T':
+            pushEvent(InputEvent::PrintTimeStatus);
+            break;
+
+        case 'm':
+        case 'M':
+            pushEvent(InputEvent::PrintDeviceStatus);
+            break;
+
+        case 'a':
+            pushEvent(InputEvent::PrintApiAuthStatus);
+            break;
+
+        case 'A':
+            pushEvent(InputEvent::ClearAuthToken);
+            break;
+
+        case 'b':
+        case 'B':
+            pushEvent(InputEvent::Reboot);
+            break;
+
+        default:
+            DebugLog::printf("Unknown serial command '%c'. Press h for help.\r\n", command);
+            break;
+    }
 }
 
-bool InputManager::wasPrintSettingsPressed()
+void InputManager::updateButtons()
 {
-    const bool pressed = printSettingsPressed_;
-    printSettingsPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasResetDefaultsPressed()
-{
-    const bool pressed = resetDefaultsPressed_;
-    resetDefaultsPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasSaveSettingsPressed()
-{
-    const bool pressed = saveSettingsPressed_;
-    saveSettingsPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasLoadSettingsPressed()
-{
-    const bool pressed = loadSettingsPressed_;
-    loadSettingsPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasPrintTimePressed()
-{
-    const bool pressed = printTimePressed_;
-    printTimePressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasPrintModePressed()
-{
-    const bool pressed = printModePressed_;
-    printModePressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasStaSettingsPressed()
-{
-    const bool pressed = staSettingsPressed_;
-    staSettingsPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasPrintApiAuthPressed()
-{
-    const bool pressed = printApiAuthPressed_;
-    printApiAuthPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasClearAuthTokenPressed()
-{
-    const bool pressed = clearAuthTokenPressed_;
-    clearAuthTokenPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasHelpPressed()
-{
-    const bool pressed = helpPressed_;
-    helpPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasConfigPortalPressed()
-{
-    const bool pressed = configPortalPressed_;
-    configPortalPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasExitConfigPortalPressed()
-{
-    const bool pressed = exitConfigPortalPressed_;
-    exitConfigPortalPressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasSetupDisplayTogglePressed()
-{
-    const bool pressed = setupDisplayTogglePressed_;
-    setupDisplayTogglePressed_ = false;
-    return pressed;
-}
-
-bool InputManager::wasRebootPressed()
-{
-    const bool pressed = rebootPressed_;
-    rebootPressed_ = false;
-    return pressed;
+    // Future hardware mapping:
+    // SETUP short press -> ShowStaSettings
+    // SETUP long press  -> EnterApSetup
+    // MODE short press  -> NextUiTheme
+    // BACK short press  -> ExitCurrentView
 }

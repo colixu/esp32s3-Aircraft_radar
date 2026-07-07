@@ -2,46 +2,26 @@
 
 #include <Arduino.h>
 
+#include "InputEvent.h"
+#include "UserSettings.h"
+
 class InputManager
 {
 public:
-    void begin(int buttonPin);
+    void begin(const UserSettings &settings);
     void update();
-    bool wasUiSwitchPressed();
-    bool wasRangeSwitchPressed();
-    bool wasGroundTogglePressed();
-    bool wasPrintSettingsPressed();
-    bool wasResetDefaultsPressed();
-    bool wasSaveSettingsPressed();
-    bool wasLoadSettingsPressed();
-    bool wasPrintTimePressed();
-    bool wasPrintModePressed();
-    bool wasStaSettingsPressed();
-    bool wasPrintApiAuthPressed();
-    bool wasClearAuthTokenPressed();
-    bool wasHelpPressed();
-    bool wasConfigPortalPressed();
-    bool wasExitConfigPortalPressed();
-    bool wasSetupDisplayTogglePressed();
-    bool wasRebootPressed();
+    bool popEvent(InputEvent &event);
 
 private:
+    static constexpr uint8_t kEventQueueSize = 8;
+
     int buttonPin_ = -1;
-    bool uiSwitchPressed_ = false;
-    bool rangeSwitchPressed_ = false;
-    bool groundTogglePressed_ = false;
-    bool printSettingsPressed_ = false;
-    bool resetDefaultsPressed_ = false;
-    bool saveSettingsPressed_ = false;
-    bool loadSettingsPressed_ = false;
-    bool printTimePressed_ = false;
-    bool printModePressed_ = false;
-    bool staSettingsPressed_ = false;
-    bool printApiAuthPressed_ = false;
-    bool clearAuthTokenPressed_ = false;
-    bool helpPressed_ = false;
-    bool configPortalPressed_ = false;
-    bool exitConfigPortalPressed_ = false;
-    bool setupDisplayTogglePressed_ = false;
-    bool rebootPressed_ = false;
+    InputEvent eventQueue_[kEventQueueSize] = {};
+    uint8_t eventHead_ = 0;
+    uint8_t eventTail_ = 0;
+    uint8_t eventCount_ = 0;
+
+    void pushEvent(InputEvent event);
+    void handleSerialCommand(char command);
+    void updateButtons();
 };
