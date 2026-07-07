@@ -16,6 +16,9 @@ public:
     bool wasLoadSettingsPressed();
     bool wasPrintTimePressed();
     bool wasPrintModePressed();
+    bool wasStaSettingsPressed();
+    bool wasPrintApiAuthPressed();
+    bool wasClearAuthTokenPressed();
     bool wasHelpPressed();
     bool wasConfigPortalPressed();
     bool wasExitConfigPortalPressed();
@@ -33,6 +36,9 @@ private:
     bool loadSettingsPressed_ = false;
     bool printTimePressed_ = false;
     bool printModePressed_ = false;
+    bool staSettingsPressed_ = false;
+    bool printApiAuthPressed_ = false;
+    bool clearAuthTokenPressed_ = false;
     bool helpPressed_ = false;
     bool configPortalPressed_ = false;
     bool exitConfigPortalPressed_ = false;

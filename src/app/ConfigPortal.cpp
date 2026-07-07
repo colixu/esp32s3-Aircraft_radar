@@ -30,12 +30,19 @@ namespace
 
 bool ConfigPortal::begin(UserSettings *settings, SettingsStore *settingsStore)
 {
+    return beginApSetup(settings, settingsStore);
+}
+
+bool ConfigPortal::beginApSetup(UserSettings *settings, SettingsStore *settingsStore)
+{
     settings_ = settings;
     settingsStore_ = settingsStore;
     restartRequested_ = false;
+    mode_ = ConfigPortalMode::ApSetup;
 
     const uint64_t mac = ESP.getEfuseMac();
     snprintf(apSsid_, sizeof(apSsid_), "AircraftRadar-%04X", static_cast<uint16_t>(mac & 0xFFFF));
+    snprintf(staIpAddress_, sizeof(staIpAddress_), "%s", WiFi.localIP().toString().c_str());
 
     WiFi.disconnect(true, true);
     WiFi.mode(WIFI_OFF);
@@ -47,6 +54,44 @@ bool ConfigPortal::begin(UserSettings *settings, SettingsStore *settingsStore)
 
     dnsRunning_ = dnsServer_.start(kDnsPort, "*", WiFi.softAPIP());
 
+    beginServer();
+    DebugLog::printf("ConfigPortal started. mode=ap_setup AP=%s IP=%s NVS=%s started=%u\r\n",
+                     apSsid_,
+                     ipAddress_,
+                     nvsStateText(),
+                     apStarted ? 1 : 0);
+    return true;
+}
+
+bool ConfigPortal::beginStaSettings(UserSettings *settings, SettingsStore *settingsStore)
+{
+    settings_ = settings;
+    settingsStore_ = settingsStore;
+    restartRequested_ = false;
+    mode_ = ConfigPortalMode::StaSettings;
+
+    const uint64_t mac = ESP.getEfuseMac();
+    snprintf(apSsid_, sizeof(apSsid_), "AircraftRadar-%04X", static_cast<uint16_t>(mac & 0xFFFF));
+    snprintf(ipAddress_, sizeof(ipAddress_), "192.168.4.1");
+    snprintf(staIpAddress_, sizeof(staIpAddress_), "%s", WiFi.localIP().toString().c_str());
+
+    if (dnsRunning_)
+    {
+        dnsServer_.stop();
+        dnsRunning_ = false;
+    }
+    WiFi.softAPdisconnect(true);
+
+    beginServer();
+    DebugLog::printf("ConfigPortal started. mode=sta_settings STA=%s NVS=%s\r\n",
+                     staIpAddress_,
+                     nvsStateText());
+    return true;
+}
+
+void ConfigPortal::beginServer()
+{
+    server_.stop();
     server_.on("/", HTTP_GET, [this]()
     {
         handleRoot();
@@ -82,12 +127,6 @@ bool ConfigPortal::begin(UserSettings *settings, SettingsStore *settingsStore)
     server_.begin();
 
     running_ = true;
-    DebugLog::printf("ConfigPortal started. AP=%s IP=%s NVS=%s started=%u\r\n",
-                     apSsid_,
-                     ipAddress_,
-                     nvsStateText(),
-                     apStarted ? 1 : 0);
-    return true;
 }
 
 void ConfigPortal::update()
@@ -117,7 +156,10 @@ void ConfigPortal::stop()
         dnsServer_.stop();
         dnsRunning_ = false;
     }
-    WiFi.softAPdisconnect(true);
+    if (mode_ == ConfigPortalMode::ApSetup)
+    {
+        WiFi.softAPdisconnect(true);
+    }
     running_ = false;
     DebugLog::println("ConfigPortal stopped.");
 }
@@ -125,6 +167,11 @@ void ConfigPortal::stop()
 bool ConfigPortal::isRunning() const
 {
     return running_;
+}
+
+ConfigPortalMode ConfigPortal::mode() const
+{
+    return mode_;
 }
 
 bool ConfigPortal::shouldRestart() const
@@ -144,7 +191,12 @@ const char *ConfigPortal::apPassword() const
 
 const char *ConfigPortal::ipAddress() const
 {
-    return ipAddress_;
+    return mode_ == ConfigPortalMode::StaSettings ? staIpAddress_ : ipAddress_;
+}
+
+const char *ConfigPortal::staIpAddress() const
+{
+    return staIpAddress_;
 }
 
 void ConfigPortal::handleRoot()
@@ -208,21 +260,29 @@ void ConfigPortal::handleStatus()
         return;
     }
 
-    char body[384];
+    char body[512];
     snprintf(body,
              sizeof(body),
-             "{\"deviceState\":\"SetupPortal\",\"wifiConfigured\":%s,\"wifiConnected\":false,"
-             "\"currentIP\":\"%s\",\"apiMode\":\"%s\",\"centerLat\":%.6f,\"centerLon\":%.6f,"
+             "{\"portalMode\":\"%s\",\"apSsid\":\"%s\",\"apIp\":\"%s\",\"staIp\":\"%s\","
+             "\"wifiConfigured\":%s,\"wifiConnected\":%s,\"currentIP\":\"%s\","
+             "\"apiMode\":\"%s\",\"centerLat\":%.6f,\"centerLon\":%.6f,"
              "\"maxRangeKm\":%.1f,\"scheduleEnabled\":%s,\"computedRequestIntervalMs\":%lu,"
+             "\"activeRequestIntervalMs\":%lu,"
              "\"nvsEnabled\":%s}",
-             settings_->wifi.configured ? "true" : "false",
+             mode_ == ConfigPortalMode::ApSetup ? "ap_setup" : "sta_settings",
+             apSsid_,
              ipAddress_,
+             staIpAddress_,
+             settings_->wifi.configured ? "true" : "false",
+             WiFi.status() == WL_CONNECTED ? "true" : "false",
+             mode_ == ConfigPortalMode::StaSettings ? staIpAddress_ : ipAddress_,
              apiAccountModeName(settings_->api.accountMode),
              settings_->location.centerLat,
              settings_->location.centerLon,
              settings_->location.maxRangeKm,
              settings_->schedule.enabled ? "true" : "false",
              static_cast<unsigned long>(settings_->api.computedRequestIntervalMs),
+             static_cast<unsigned long>(activeRequestIntervalMs(*settings_)),
              nvsJsonText());
     server_.send(200, "application/json", body);
 }
@@ -264,10 +324,23 @@ void ConfigPortal::renderSimplePage()
     sendLanguageSwitch("/");
     write("<h1>");
     write(text("Aircraft Radar Setup", "航班雷达设置"));
-    write("</h1><p>AP: ");
-    write(apSsid_);
-    write(" / IP: ");
-    write(ipAddress_);
+    write("</h1><p>");
+    if (mode_ == ConfigPortalMode::ApSetup)
+    {
+        write(text("You are connected to the device setup WiFi. Save WiFi settings and restart.",
+                   "请连接设备配置 WiFi，保存 WiFi 后重启设备。"));
+        write("</p><p>AP: ");
+        write(apSsid_);
+        write(" / IP: ");
+        write(ipAddress_);
+    }
+    else
+    {
+        write(text("You are connected through your home WiFi. You can update settings here.",
+                   "当前通过家庭 WiFi 访问，可以在这里修改设置。"));
+        write("</p><p>IP: ");
+        write(staIpAddress_);
+    }
     write("</p><form method=\"POST\" action=\"/saveSimple\">");
     sendHiddenLanguage();
 
@@ -618,15 +691,20 @@ void ConfigPortal::applySimpleFormToSettings()
 
     settings.api.provider = ApiProvider::OpenSky;
     const String apiMode = server_.hasArg("apiMode") ? server_.arg("apiMode") : "anonymous";
+    settings.api.refreshPolicy = RefreshPolicy::AutoByDailyBudget;
     if (apiMode == "client")
     {
         settings.api.accountMode = ApiAccountMode::OpenSkyClient;
+        settings.api.dailyCreditBudget = 4000;
+        settings.api.minUsefulIntervalMs = 5000;
         copyArgToBuffer("openSkyClientId", settings.api.openSkyClientId, sizeof(settings.api.openSkyClientId), false);
         copyArgToBuffer("openSkyClientSecret", settings.api.openSkyClientSecret, sizeof(settings.api.openSkyClientSecret), true);
     }
     else
     {
         settings.api.accountMode = ApiAccountMode::Anonymous;
+        settings.api.dailyCreditBudget = 400;
+        settings.api.minUsefulIntervalMs = 10000;
     }
 
     const String scheduleMode = server_.hasArg("scheduleMode") ? server_.arg("scheduleMode") : "always";

@@ -3,6 +3,8 @@
 #include <Arduino.h>
 
 #include "../app/AppConfig.h"
+#include "../app/UserSettings.h"
+#include "OpenSkyAuthClient.h"
 
 struct ApiAircraft
 {
@@ -23,6 +25,7 @@ public:
     static constexpr uint8_t kMaxAircraft = 64;
 
     bool requestStates(const AppConfig &config);
+    bool requestStates(const AppConfig &config, const UserSettings &settings, OpenSkyAuthClient *authClient);
 
     const ApiAircraft *aircraft() const;
     uint8_t aircraftCount() const;
@@ -44,6 +47,7 @@ private:
     char lastError_[64] = "not requested";
 
     String buildUrl(const AppConfig &config) const;
+    bool performStatesRequest(const String &url, const char *bearerToken, String &payload);
     bool parsePayload(const String &payload);
     void printSummary() const;
     void clearAircraft();

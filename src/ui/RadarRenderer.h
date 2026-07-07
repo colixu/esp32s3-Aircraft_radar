@@ -12,6 +12,14 @@ enum class SetupDisplayMode
     Details
 };
 
+enum class SettingsDisplayMode
+{
+    ApQr,
+    ApDetails,
+    StaQr,
+    StaDetails
+};
+
 class RadarRenderer
 {
 public:
@@ -31,6 +39,12 @@ public:
                                 const char *ipAddress,
                                 const char *statusText,
                                 SetupDisplayMode mode);
+    void renderSettingsFrame(const char *apSsid,
+                             const char *apPassword,
+                             const char *apIpAddress,
+                             const char *staIpAddress,
+                             const char *statusText,
+                             SettingsDisplayMode mode);
     void renderSystemStatusFrame(const char *line1,
                                  const char *line2,
                                  const char *line3);

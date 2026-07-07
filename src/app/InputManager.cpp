@@ -51,6 +51,18 @@ void InputManager::update()
         {
             printModePressed_ = true;
         }
+        else if (command == 'w' || command == 'W')
+        {
+            staSettingsPressed_ = true;
+        }
+        else if (command == 'a')
+        {
+            printApiAuthPressed_ = true;
+        }
+        else if (command == 'A')
+        {
+            clearAuthTokenPressed_ = true;
+        }
         else if (command == 'h' || command == 'H')
         {
             helpPressed_ = true;
@@ -136,6 +148,27 @@ bool InputManager::wasPrintModePressed()
 {
     const bool pressed = printModePressed_;
     printModePressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasStaSettingsPressed()
+{
+    const bool pressed = staSettingsPressed_;
+    staSettingsPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasPrintApiAuthPressed()
+{
+    const bool pressed = printApiAuthPressed_;
+    printApiAuthPressed_ = false;
+    return pressed;
+}
+
+bool InputManager::wasClearAuthTokenPressed()
+{
+    const bool pressed = clearAuthTokenPressed_;
+    clearAuthTokenPressed_ = false;
     return pressed;
 }
 

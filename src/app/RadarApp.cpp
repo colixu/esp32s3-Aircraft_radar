@@ -64,6 +64,7 @@ void RadarApp::beginConfiguredMode()
             enterSetupPortal("WiFi setup required");
             return;
         }
+        beginStaSettingsServer();
         beginApiTest();
         return;
     }
@@ -75,6 +76,7 @@ void RadarApp::beginConfiguredMode()
             enterSetupPortal("WiFi setup required");
             return;
         }
+        beginStaSettingsServer();
         beginRealRadar();
         return;
     }
@@ -86,6 +88,16 @@ void RadarApp::update()
 {
     const uint32_t now = millis();
     updateInput();
+
+    if (configPortal_.isRunning() && configPortal_.mode() == ConfigPortalMode::StaSettings)
+    {
+        configPortal_.update();
+        if (configPortal_.shouldRestart())
+        {
+            delay(300);
+            ESP.restart();
+        }
+    }
 
     if (deviceState_ == DeviceState::SetupPortal)
     {
@@ -201,7 +213,15 @@ void RadarApp::updateInput()
         {
             exitSetupPortal();
         }
+        else if (staSettingsOverlayVisible_)
+        {
+            hideStaSettingsOverlay();
+        }
         return;
+    }
+    if (inputManager_.wasStaSettingsPressed())
+    {
+        showStaSettingsOverlay();
     }
     if (inputManager_.wasSetupDisplayTogglePressed())
     {
@@ -230,6 +250,14 @@ void RadarApp::updateInput()
     if (inputManager_.wasPrintModePressed())
     {
         printDeviceStateStatus();
+    }
+    if (inputManager_.wasPrintApiAuthPressed())
+    {
+        printApiAuthStatus();
+    }
+    if (inputManager_.wasClearAuthTokenPressed())
+    {
+        clearAuthToken();
     }
     if (inputManager_.wasResetDefaultsPressed())
     {
@@ -264,6 +292,7 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  c: enter setup portal");
     DebugLog::println("  x: exit setup portal");
     DebugLog::println("  q: toggle setup QR/details");
+    DebugLog::println("  w: show STA settings URL QR");
     DebugLog::println("  u: switch UI theme");
     DebugLog::println("  r: switch radar range");
     DebugLog::println("  g: toggle ground traffic");
@@ -271,6 +300,8 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  l: load settings");
     DebugLog::println("  t: print time/schedule status");
     DebugLog::println("  m: print device mode/state");
+    DebugLog::println("  a: print API/auth status");
+    DebugLog::println("  A: clear OpenSky token");
     DebugLog::println("  d: reset settings to default");
     DebugLog::println("  b: reboot device");
 }
@@ -316,18 +347,95 @@ void RadarApp::toggleGroundTraffic()
 
 void RadarApp::toggleSetupDisplayMode()
 {
-    if (deviceState_ != DeviceState::SetupPortal)
+    if (deviceState_ == DeviceState::SetupPortal)
     {
-        DebugLog::println("q ignored: not in setup portal.");
+        setupDisplayMode_ = setupDisplayMode_ == SetupDisplayMode::QrCode ?
+                            SetupDisplayMode::Details :
+                            SetupDisplayMode::QrCode;
+        settingsDisplayMode_ = setupDisplayMode_ == SetupDisplayMode::QrCode ?
+                               SettingsDisplayMode::ApQr :
+                               SettingsDisplayMode::ApDetails;
+        DebugLog::printf("AP setup display mode: %s\r\n",
+                         setupDisplayMode_ == SetupDisplayMode::QrCode ? "QR" : "Details");
+        renderSetupPortalFrame(nullptr);
         return;
     }
 
-    setupDisplayMode_ = setupDisplayMode_ == SetupDisplayMode::QrCode ?
-                        SetupDisplayMode::Details :
-                        SetupDisplayMode::QrCode;
-    DebugLog::printf("Setup display mode: %s\r\n",
-                     setupDisplayMode_ == SetupDisplayMode::QrCode ? "QR" : "Details");
-    renderSetupPortalFrame(nullptr);
+    if (staSettingsOverlayVisible_)
+    {
+        settingsDisplayMode_ = settingsDisplayMode_ == SettingsDisplayMode::StaQr ?
+                               SettingsDisplayMode::StaDetails :
+                               SettingsDisplayMode::StaQr;
+        DebugLog::printf("STA settings display mode: %s\r\n",
+                         settingsDisplayMode_ == SettingsDisplayMode::StaQr ? "QR" : "Details");
+        renderSettingsDisplay(nullptr);
+        return;
+    }
+
+    DebugLog::println("q ignored: no settings display is active.");
+}
+
+void RadarApp::showStaSettingsOverlay()
+{
+    if (!wifi_.isConnected())
+    {
+        DebugLog::println("w ignored: WiFi is not connected.");
+        return;
+    }
+
+    beginStaSettingsServer();
+    staSettingsOverlayVisible_ = true;
+    settingsDisplayMode_ = SettingsDisplayMode::StaQr;
+    DebugLog::printf("STA settings URL: http://%s/\r\n", WiFi.localIP().toString().c_str());
+    renderSettingsDisplay(nullptr);
+}
+
+void RadarApp::hideStaSettingsOverlay()
+{
+    if (!staSettingsOverlayVisible_)
+    {
+        return;
+    }
+
+    staSettingsOverlayVisible_ = false;
+    DebugLog::println("STA settings overlay hidden.");
+    if (config_.appMode == AppMode::RealRadar)
+    {
+        renderRealRadarFrame();
+    }
+    else if (config_.appMode == AppMode::RadarDemo)
+    {
+        renderFrame();
+    }
+}
+
+void RadarApp::renderSettingsDisplay(const char *statusText)
+{
+    renderer_.renderSettingsFrame(configPortal_.apSsid(),
+                                  configPortal_.apPassword(),
+                                  "192.168.4.1",
+                                  WiFi.localIP().toString().c_str(),
+                                  statusText,
+                                  settingsDisplayMode_);
+}
+
+void RadarApp::beginStaSettingsServer()
+{
+    if (!wifi_.isConnected())
+    {
+        return;
+    }
+
+    if (configPortal_.isRunning() && configPortal_.mode() == ConfigPortalMode::StaSettings)
+    {
+        return;
+    }
+
+    if (configPortal_.isRunning())
+    {
+        configPortal_.stop();
+    }
+    configPortal_.beginStaSettings(&settings_, &settingsStore_);
 }
 
 void RadarApp::resetSettingsToDefault()
@@ -379,19 +487,46 @@ void RadarApp::printDeviceStateStatus()
                      static_cast<unsigned long>(currentRealApiIntervalMs_));
 }
 
+void RadarApp::printApiAuthStatus()
+{
+    DebugLog::println("API/auth status:");
+    DebugLog::printf("  accountMode=%s\r\n", apiAccountModeName(settings_.api.accountMode));
+    DebugLog::printf("  hasClientId=%u hasClientSecret=%u\r\n",
+                     settings_.api.openSkyClientId[0] != '\0' ? 1 : 0,
+                     settings_.api.openSkyClientSecret[0] != '\0' ? 1 : 0);
+    DebugLog::printf("  tokenValid=%u tokenExpiresIn=%lus\r\n",
+                     realApiUpdater_.tokenValid() ? 1 : 0,
+                     static_cast<unsigned long>(realApiUpdater_.tokenExpiresInMs() / 1000UL));
+    DebugLog::printf("  lastAuthError=%s\r\n", realApiUpdater_.lastAuthError());
+    DebugLog::printf("  lastHttpStatus=%d lastApiError=%s\r\n",
+                     realApiUpdater_.lastHttpStatus(),
+                     realApiUpdater_.lastError());
+}
+
+void RadarApp::clearAuthToken()
+{
+    realApiUpdater_.invalidateAuthToken();
+}
+
 void RadarApp::enterSetupPortal(const char *reason)
 {
-    if (configPortal_.isRunning())
+    if (configPortal_.isRunning() && configPortal_.mode() == ConfigPortalMode::ApSetup)
     {
         renderSetupPortalFrame(reason);
         return;
     }
 
     DebugLog::printf("Entering setup portal: %s\r\n", reason != nullptr ? reason : "requested");
+    if (configPortal_.isRunning())
+    {
+        configPortal_.stop();
+    }
     realApiUpdater_.stop();
     wifi_.stop();
     wifiManagerStarted_ = false;
     setupDisplayMode_ = SetupDisplayMode::QrCode;
+    settingsDisplayMode_ = SettingsDisplayMode::ApQr;
+    staSettingsOverlayVisible_ = false;
     setDeviceState(DeviceState::SetupPortal);
 
     if (!renderer_.isReady())
@@ -399,7 +534,7 @@ void RadarApp::enterSetupPortal(const char *reason)
         renderer_.begin();
     }
 
-    configPortal_.begin(&settings_, &settingsStore_);
+    configPortal_.beginApSetup(&settings_, &settingsStore_);
     renderSetupPortalFrame(reason);
 }
 
@@ -426,11 +561,10 @@ void RadarApp::updateSetupPortal(uint32_t now)
 
 void RadarApp::renderSetupPortalFrame(const char *statusText)
 {
-    renderer_.renderSetupPortalFrame(configPortal_.apSsid(),
-                                     configPortal_.apPassword(),
-                                     configPortal_.ipAddress(),
-                                     statusText,
-                                     setupDisplayMode_);
+    settingsDisplayMode_ = setupDisplayMode_ == SetupDisplayMode::QrCode ?
+                           SettingsDisplayMode::ApQr :
+                           SettingsDisplayMode::ApDetails;
+    renderSettingsDisplay(statusText);
 }
 
 void RadarApp::setDeviceState(DeviceState state, const char *reason)
@@ -553,17 +687,22 @@ bool RadarApp::updateRealRadarRunGate(uint32_t now, bool forceCheck)
 void RadarApp::ensureRealRadarUpdaterRunning()
 {
     const uint32_t intervalMs = activeRequestIntervalMs(settings_);
+    bool intervalChanged = false;
     if (intervalMs != currentRealApiIntervalMs_)
     {
         currentRealApiIntervalMs_ = intervalMs;
+        intervalChanged = true;
         DebugLog::printf("RealRadar API interval updated: %lu ms (%s)\r\n",
                          static_cast<unsigned long>(currentRealApiIntervalMs_),
                          refreshPolicyName(settings_.api.refreshPolicy));
-        stopRealRadarUpdater();
     }
 
     if (realApiUpdater_.isRunning())
     {
+        if (intervalChanged)
+        {
+            realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_);
+        }
         return;
     }
 
@@ -649,8 +788,11 @@ void RadarApp::updateRadarDemo(uint32_t now)
     }
     lastFrameMs_ = now;
 
-    renderFrame();
-    renderer_.advanceSweep(config_.sweepStepDeg);
+    if (!staSettingsOverlayVisible_)
+    {
+        renderFrame();
+        renderer_.advanceSweep(config_.sweepStepDeg);
+    }
 }
 
 void RadarApp::updateApiTest(uint32_t now)
@@ -708,6 +850,10 @@ void RadarApp::updateRealRadar(uint32_t now)
             setDeviceState(DeviceState::WiFiLost, "WiFi lost");
             renderRealRadarSystemStatus();
         }
+        else if (now - wifiLostSinceMs_ > 30000)
+        {
+            enterSetupPortal("WiFi lost");
+        }
         return;
     }
 
@@ -715,6 +861,7 @@ void RadarApp::updateRealRadar(uint32_t now)
     {
         wifiLostSinceMs_ = 0;
         DebugLog::println("WiFi reconnected, restarting time sync and schedule check.");
+        beginStaSettingsServer();
         timeManager_.begin(settings_);
         lastScheduleCheckMs_ = 0;
     }
@@ -752,8 +899,11 @@ void RadarApp::updateRealRadar(uint32_t now)
 
     lastFrameMs_ = now;
     updateRealRadarStatus();
-    renderRealRadarFrame();
-    renderer_.advanceSweep(config_.sweepStepDeg);
+    if (!staSettingsOverlayVisible_)
+    {
+        renderRealRadarFrame();
+        renderer_.advanceSweep(config_.sweepStepDeg);
+    }
 }
 
 void RadarApp::updateAircraftData(uint32_t now)
@@ -837,15 +987,44 @@ void RadarApp::updateRealRadarStatus()
         return;
     }
 
+    if (settings_.api.accountMode == ApiAccountMode::OpenSkyClient &&
+        (settings_.api.openSkyClientId[0] == '\0' || settings_.api.openSkyClientSecret[0] == '\0'))
+    {
+        snprintf(realRadarStatus_, sizeof(realRadarStatus_), "AUTH CONFIG");
+        return;
+    }
+
     if (realApiUpdater_.isUpdating())
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "UPDATING");
         return;
     }
 
+    const char *apiError = realApiUpdater_.lastError();
+    const char *authError = realApiUpdater_.lastAuthError();
+    if ((apiError != nullptr && strncmp(apiError, "AUTH CONFIG", 11) == 0) ||
+        (authError != nullptr && strncmp(authError, "AUTH CONFIG", 11) == 0))
+    {
+        snprintf(realRadarStatus_, sizeof(realRadarStatus_), "AUTH CONFIG");
+        return;
+    }
+
+    if ((apiError != nullptr && strncmp(apiError, "AUTH", 4) == 0) ||
+        (authError != nullptr && strncmp(authError, "AUTH", 4) == 0 && strcmp(authError, "OK") != 0))
+    {
+        snprintf(realRadarStatus_, sizeof(realRadarStatus_), "AUTH ERR");
+        return;
+    }
+
     if (realApiUpdater_.lastHttpStatus() == 429)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "HTTP 429");
+        return;
+    }
+
+    if (realApiUpdater_.lastHttpStatus() == 401)
+    {
+        snprintf(realRadarStatus_, sizeof(realRadarStatus_), "HTTP 401");
         return;
     }
 
@@ -876,7 +1055,13 @@ void RadarApp::updateRealRadarStatus()
         return;
     }
 
-    snprintf(realRadarStatus_, sizeof(realRadarStatus_), "LIVE N=%u %lus", realAircraftCount_, static_cast<unsigned long>(ageSec));
+    const uint32_t intervalSec = currentRealApiIntervalMs_ / 1000UL;
+    snprintf(realRadarStatus_,
+             sizeof(realRadarStatus_),
+             "LIVE N=%u %lu/%lus",
+             realAircraftCount_,
+             static_cast<unsigned long>(ageSec),
+             static_cast<unsigned long>(intervalSec));
 }
 
 void RadarApp::printApiTestSerialStatus()

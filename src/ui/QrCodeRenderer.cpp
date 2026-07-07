@@ -304,26 +304,15 @@ namespace
     }
 }
 
-bool QrCodeRenderer::drawWifiQr(TFT_eSprite &canvas,
-                                const char *ssid,
-                                const char *password,
+bool QrCodeRenderer::drawTextQr(TFT_eSprite &canvas,
+                                const char *payload,
                                 int16_t centerX,
                                 int16_t topY,
                                 int16_t maxSize)
 {
-    if (ssid == nullptr || ssid[0] == '\0')
+    if (payload == nullptr || payload[0] == '\0')
     {
         return false;
-    }
-
-    char payload[80];
-    if (password != nullptr && password[0] != '\0')
-    {
-        snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;", ssid, password);
-    }
-    else
-    {
-        snprintf(payload, sizeof(payload), "WIFI:T:nopass;S:%s;;", ssid);
     }
 
     if (!buildQrMatrix(payload))
@@ -355,4 +344,29 @@ bool QrCodeRenderer::drawWifiQr(TFT_eSprite &canvas,
     }
 
     return true;
+}
+
+bool QrCodeRenderer::drawWifiQr(TFT_eSprite &canvas,
+                                const char *ssid,
+                                const char *password,
+                                int16_t centerX,
+                                int16_t topY,
+                                int16_t maxSize)
+{
+    if (ssid == nullptr || ssid[0] == '\0')
+    {
+        return false;
+    }
+
+    char payload[80];
+    if (password != nullptr && password[0] != '\0')
+    {
+        snprintf(payload, sizeof(payload), "WIFI:T:WPA;S:%s;P:%s;;", ssid, password);
+    }
+    else
+    {
+        snprintf(payload, sizeof(payload), "WIFI:T:nopass;S:%s;;", ssid);
+    }
+
+    return drawTextQr(canvas, payload, centerX, topY, maxSize);
 }

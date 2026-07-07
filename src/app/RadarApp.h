@@ -46,6 +46,8 @@ private:
     char realRadarStatus_[32] = "LIVE WAIT";
     DeviceState deviceState_ = DeviceState::Boot;
     SetupDisplayMode setupDisplayMode_ = SetupDisplayMode::QrCode;
+    SettingsDisplayMode settingsDisplayMode_ = SettingsDisplayMode::ApQr;
+    bool staSettingsOverlayVisible_ = false;
     bool wifiManagerStarted_ = false;
 
     uint8_t selectedAircraftIndex_ = 0;
@@ -71,9 +73,15 @@ private:
     void switchRange();
     void toggleGroundTraffic();
     void toggleSetupDisplayMode();
+    void showStaSettingsOverlay();
+    void hideStaSettingsOverlay();
+    void renderSettingsDisplay(const char *statusText);
+    void beginStaSettingsServer();
     void resetSettingsToDefault();
     void printTimeStatus();
     void printDeviceStateStatus();
+    void printApiAuthStatus();
+    void clearAuthToken();
     void enterSetupPortal(const char *reason);
     void exitSetupPortal();
     void updateSetupPortal(uint32_t now);

@@ -8,6 +8,14 @@
 
 bool OpenSkyProvider::requestStates(const AppConfig &config)
 {
+    UserSettings anonymousSettings;
+    loadDefaultUserSettings(anonymousSettings, config);
+    anonymousSettings.api.accountMode = ApiAccountMode::Anonymous;
+    return requestStates(config, anonymousSettings, nullptr);
+}
+
+bool OpenSkyProvider::requestStates(const AppConfig &config, const UserSettings &settings, OpenSkyAuthClient *authClient)
+{
     clearAircraft();
     payloadLength_ = 0;
     httpStatusCode_ = 0;
@@ -18,33 +26,50 @@ bool OpenSkyProvider::requestStates(const AppConfig &config)
     DebugLog::println("OpenSky request:");
     DebugLog::println(url.c_str());
 
-    WiFiClientSecure client;
-    client.setInsecure();
-
-    HTTPClient https;
-    if (!https.begin(client, url))
+    char token[2048] = "";
+    const bool useAuth = settings.api.accountMode == ApiAccountMode::OpenSkyClient;
+    if (useAuth)
     {
-        setError("HTTPS begin failed");
-        DebugLog::println(lastError_);
-        return false;
+        if (authClient == nullptr || !authClient->getValidToken(settings, token, sizeof(token)))
+        {
+            httpStatusCode_ = 0;
+            setError(authClient != nullptr ? authClient->lastError() : "AUTH ERR");
+            DebugLog::printf("OpenSky request skipped: %s\r\n", lastError_);
+            return false;
+        }
     }
 
-    httpStatusCode_ = https.GET();
-    DebugLog::printf("HTTP status: %d\r\n", httpStatusCode_);
-
-    if (httpStatusCode_ <= 0)
+    String payload;
+    if (!performStatesRequest(url, useAuth ? token : nullptr, payload))
     {
-        snprintf(lastError_, sizeof(lastError_), "HTTP error %d", httpStatusCode_);
-        DebugLog::println(lastError_);
-        https.end();
-        return false;
+        if (useAuth && httpStatusCode_ == 401 && authClient != nullptr)
+        {
+            DebugLog::println("OpenSky auth: 401 received, refresh token and retry");
+            authClient->invalidateToken();
+            token[0] = '\0';
+            if (authClient->getValidToken(settings, token, sizeof(token)))
+            {
+                if (performStatesRequest(url, token, payload))
+                {
+                    DebugLog::println("OpenSky auth: retry OK");
+                }
+                else
+                {
+                    DebugLog::println("OpenSky auth: retry failed");
+                    return false;
+                }
+            }
+            else
+            {
+                setError(authClient->lastError());
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
     }
-
-    String payload = https.getString();
-    https.end();
-
-    payloadLength_ = payload.length();
-    DebugLog::printf("Payload length: %lu bytes\r\n", static_cast<unsigned long>(payloadLength_));
 
     if (httpStatusCode_ == 429)
     {
@@ -69,6 +94,45 @@ bool OpenSkyProvider::requestStates(const AppConfig &config)
     setError("OK");
     DebugLog::printf("Parsed aircraft: %u\r\n", aircraftCount_);
     printSummary();
+    return true;
+}
+
+bool OpenSkyProvider::performStatesRequest(const String &url, const char *bearerToken, String &payload)
+{
+    WiFiClientSecure client;
+    client.setInsecure();
+
+    HTTPClient https;
+    if (!https.begin(client, url))
+    {
+        setError("HTTPS begin failed");
+        DebugLog::println(lastError_);
+        return false;
+    }
+
+    if (bearerToken != nullptr && bearerToken[0] != '\0')
+    {
+        String authorization = "Bearer ";
+        authorization += bearerToken;
+        https.addHeader("Authorization", authorization);
+    }
+
+    httpStatusCode_ = https.GET();
+    DebugLog::printf("HTTP status: %d\r\n", httpStatusCode_);
+
+    if (httpStatusCode_ <= 0)
+    {
+        snprintf(lastError_, sizeof(lastError_), "HTTP error %d", httpStatusCode_);
+        DebugLog::println(lastError_);
+        https.end();
+        return false;
+    }
+
+    payload = https.getString();
+    https.end();
+
+    payloadLength_ = payload.length();
+    DebugLog::printf("Payload length: %lu bytes\r\n", static_cast<unsigned long>(payloadLength_));
     return true;
 }
 

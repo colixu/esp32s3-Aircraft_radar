@@ -125,6 +125,21 @@ void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
                                            const char *statusText,
                                            SetupDisplayMode mode)
 {
+    renderSettingsFrame(apSsid,
+                        apPassword,
+                        ipAddress,
+                        nullptr,
+                        statusText,
+                        mode == SetupDisplayMode::QrCode ? SettingsDisplayMode::ApQr : SettingsDisplayMode::ApDetails);
+}
+
+void RadarRenderer::renderSettingsFrame(const char *apSsid,
+                                        const char *apPassword,
+                                        const char *apIpAddress,
+                                        const char *staIpAddress,
+                                        const char *statusText,
+                                        SettingsDisplayMode mode)
+{
     if (!frameBufferReady_)
     {
         return;
@@ -135,7 +150,7 @@ void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
     frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
     frame_.drawCircle(kCenterX, kCenterY, 40, dimGreen_);
 
-    if (mode == SetupDisplayMode::QrCode)
+    if (mode == SettingsDisplayMode::ApQr)
     {
         frame_.setTextDatum(MC_DATUM);
         frame_.setTextColor(sweepGreen_, TFT_BLACK);
@@ -156,7 +171,7 @@ void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
                               kCenterX,
                               204,
                               1);
-            frame_.drawString(ipAddress != nullptr ? ipAddress : "192.168.4.1", kCenterX, 218, 1);
+            frame_.drawString(apIpAddress != nullptr ? apIpAddress : "192.168.4.1", kCenterX, 218, 1);
         }
         else
         {
@@ -164,6 +179,44 @@ void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
             frame_.drawString("Press q for details", kCenterX, 126, 1);
         }
 
+        frame_.pushSprite(0, 0);
+        return;
+    }
+
+    if (mode == SettingsDisplayMode::StaQr)
+    {
+        char url[40];
+        snprintf(url, sizeof(url), "http://%s/", staIpAddress != nullptr ? staIpAddress : "0.0.0.0");
+
+        frame_.setTextDatum(MC_DATUM);
+        frame_.setTextColor(sweepGreen_, TFT_BLACK);
+        frame_.drawString("SETTINGS", kCenterX, 28, 2);
+
+        const bool qrOk = QrCodeRenderer::drawTextQr(frame_, url, kCenterX, 46, 152);
+        frame_.setTextColor(labelGreen_, TFT_BLACK);
+        frame_.drawString(qrOk ? "Scan to open" : "QR payload too long", kCenterX, 204, 1);
+        frame_.drawString(url, kCenterX, 218, 1);
+        frame_.pushSprite(0, 0);
+        return;
+    }
+
+    if (mode == SettingsDisplayMode::StaDetails)
+    {
+        char url[40];
+        snprintf(url, sizeof(url), "http://%s/", staIpAddress != nullptr ? staIpAddress : "0.0.0.0");
+
+        frame_.setTextDatum(MC_DATUM);
+        frame_.setTextColor(sweepGreen_, TFT_BLACK);
+        frame_.drawString("SETTINGS", kCenterX, 74, 2);
+        frame_.setTextColor(labelGreen_, TFT_BLACK);
+        frame_.drawString("WiFi connected", kCenterX, 106, 1);
+        frame_.drawString("IP", kCenterX, 130, 1);
+        frame_.setTextColor(selectedGreen_, TFT_BLACK);
+        frame_.drawString(staIpAddress != nullptr ? staIpAddress : "", kCenterX, 144, 1);
+        frame_.setTextColor(labelGreen_, TFT_BLACK);
+        frame_.drawString("URL", kCenterX, 166, 1);
+        frame_.setTextColor(selectedGreen_, TFT_BLACK);
+        frame_.drawString(url, kCenterX, 180, 1);
         frame_.pushSprite(0, 0);
         return;
     }
@@ -185,7 +238,7 @@ void RadarRenderer::renderSetupPortalFrame(const char *apSsid,
     frame_.setTextColor(labelGreen_, TFT_BLACK);
     frame_.drawString("URL", kCenterX, 162, 1);
     frame_.setTextColor(selectedGreen_, TFT_BLACK);
-    frame_.drawString(ipAddress != nullptr ? ipAddress : "192.168.4.1", kCenterX, 176, 1);
+    frame_.drawString(apIpAddress != nullptr ? apIpAddress : "192.168.4.1", kCenterX, 176, 1);
 
     if (statusText != nullptr && statusText[0] != '\0')
     {

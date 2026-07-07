@@ -9,7 +9,16 @@ bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &set
 {
     if (taskHandle_ != nullptr)
     {
+        config_ = config;
+        config_.openSkyLamin = settings.location.queryLatMin;
+        config_.openSkyLomin = settings.location.queryLonMin;
+        config_.openSkyLamax = settings.location.queryLatMax;
+        config_.openSkyLomax = settings.location.queryLonMax;
         requestIntervalMs_ = requestIntervalMs;
+        settings_ = settings;
+        nextRequestMs_ = millis();
+        DebugLog::printf("OpenSkyAsyncUpdater: settings updated, next request now, interval=%lu ms\r\n",
+                         static_cast<unsigned long>(requestIntervalMs_));
         return !stopRequested_;
     }
 
@@ -18,7 +27,10 @@ bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &set
     config_.openSkyLomin = settings.location.queryLonMin;
     config_.openSkyLamax = settings.location.queryLatMax;
     config_.openSkyLomax = settings.location.queryLonMax;
+    settings_ = settings;
     requestIntervalMs_ = requestIntervalMs;
+    nextRequestMs_ = 0;
+    authClient_.begin();
     mutex_ = xSemaphoreCreateMutex();
     if (mutex_ == nullptr)
     {
@@ -105,6 +117,27 @@ const char *OpenSkyAsyncUpdater::lastError() const
     return lastError_;
 }
 
+bool OpenSkyAsyncUpdater::tokenValid() const
+{
+    return authClient_.isAuthenticated();
+}
+
+uint32_t OpenSkyAsyncUpdater::tokenExpiresInMs() const
+{
+    return authClient_.tokenExpiresInMs();
+}
+
+const char *OpenSkyAsyncUpdater::lastAuthError() const
+{
+    return authClient_.lastError();
+}
+
+void OpenSkyAsyncUpdater::invalidateAuthToken()
+{
+    authClient_.invalidateToken();
+    DebugLog::println("OpenSky auth: token cleared by serial command.");
+}
+
 void OpenSkyAsyncUpdater::taskEntry(void *arg)
 {
     static_cast<OpenSkyAsyncUpdater *>(arg)->taskLoop();
@@ -113,7 +146,6 @@ void OpenSkyAsyncUpdater::taskEntry(void *arg)
 void OpenSkyAsyncUpdater::taskLoop()
 {
     OpenSkyProvider provider;
-    uint32_t nextRequestMs = 0;
 
     while (!stopRequested_)
     {
@@ -124,7 +156,7 @@ void OpenSkyAsyncUpdater::taskLoop()
             continue;
         }
 
-        if (now < nextRequestMs)
+        if (nextRequestMs_ != 0 && now < nextRequestMs_)
         {
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
@@ -133,7 +165,7 @@ void OpenSkyAsyncUpdater::taskLoop()
         updating_ = true;
         DebugLog::println("API request start");
         const uint32_t startMs = millis();
-        const bool requestOk = provider.requestStates(config_);
+        const bool requestOk = provider.requestStates(config_, settings_, &authClient_);
         const uint32_t completedMs = millis();
         const uint32_t durationMs = completedMs - startMs;
         DebugLog::printf("API request done, duration=%lu ms\r\n", static_cast<unsigned long>(durationMs));
@@ -146,7 +178,7 @@ void OpenSkyAsyncUpdater::taskLoop()
         {
             waitMs = max<uint32_t>(requestIntervalMs_ * 2, 120000);
         }
-        nextRequestMs = millis() + waitMs;
+        nextRequestMs_ = millis() + waitMs;
     }
 
     running_ = false;

@@ -4,6 +4,7 @@
 
 #include "../app/AppConfig.h"
 #include "../app/UserSettings.h"
+#include "OpenSkyAuthClient.h"
 #include "OpenSkyProvider.h"
 
 struct OpenSkySnapshot
@@ -33,10 +34,17 @@ public:
     int lastHttpStatus() const;
     uint32_t lastSuccessMs() const;
     const char *lastError() const;
+    bool tokenValid() const;
+    uint32_t tokenExpiresInMs() const;
+    const char *lastAuthError() const;
+    void invalidateAuthToken();
 
 private:
     AppConfig config_;
+    UserSettings settings_;
+    OpenSkyAuthClient authClient_;
     uint32_t requestIntervalMs_ = 60000;
+    volatile uint32_t nextRequestMs_ = 0;
     TaskHandle_t taskHandle_ = nullptr;
     SemaphoreHandle_t mutex_ = nullptr;
     OpenSkySnapshot snapshot_;

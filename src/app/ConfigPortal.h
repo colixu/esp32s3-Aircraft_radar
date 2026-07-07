@@ -7,18 +7,28 @@
 #include "SettingsStore.h"
 #include "UserSettings.h"
 
+enum class ConfigPortalMode
+{
+    ApSetup,
+    StaSettings
+};
+
 class ConfigPortal
 {
 public:
     bool begin(UserSettings *settings, SettingsStore *settingsStore);
+    bool beginApSetup(UserSettings *settings, SettingsStore *settingsStore);
+    bool beginStaSettings(UserSettings *settings, SettingsStore *settingsStore);
     void update();
     void stop();
 
     bool isRunning() const;
+    ConfigPortalMode mode() const;
     bool shouldRestart() const;
     const char *apSsid() const;
     const char *apPassword() const;
     const char *ipAddress() const;
+    const char *staIpAddress() const;
 
 private:
     enum class PageLanguage
@@ -37,11 +47,14 @@ private:
     bool running_ = false;
     bool restartRequested_ = false;
     bool dnsRunning_ = false;
+    ConfigPortalMode mode_ = ConfigPortalMode::ApSetup;
     PageLanguage pageLanguage_ = PageLanguage::English;
     char apSsid_[32] = "";
     char ipAddress_[16] = "192.168.4.1";
+    char staIpAddress_[16] = "0.0.0.0";
     String page_;
 
+    void beginServer();
     void handleRoot();
     void handleAdvanced();
     void handleSave();
