@@ -48,6 +48,11 @@ public:
     void renderSystemStatusFrame(const char *line1,
                                  const char *line2,
                                  const char *line3);
+    void renderClockFrame(const char *timeText,
+                          const char *dateText,
+                          const char *nextRunText,
+                          const char *hintText);
+    void renderBlankFrame();
 
 private:
     static constexpr int16_t kCenterX = 120;
@@ -68,6 +73,14 @@ private:
     uint16_t aircraftGreen_;
     uint16_t selectedGreen_;
     uint16_t labelGreen_;
+    uint16_t modernBg_;
+    uint16_t modernGrid_;
+    uint16_t modernText_;
+    uint16_t modernCenter_;
+    uint16_t modernAircraft_;
+    uint16_t modernVector_;
+    uint16_t modernTagType_;
+    uint16_t modernTagAlt_;
     float sweepAngleDeg_ = 0.0f;
 
     void printDisplaySetup();
@@ -109,6 +122,49 @@ private:
                                  uint8_t selectedAircraftIndex,
                                  const AppConfig &config,
                                  const char *statusText);
-    void renderModernPlaceholder(uint8_t aircraftCount, const char *statusText);
+    void renderModernRadarFrame(const Aircraft *aircraft,
+                                uint8_t aircraftCount,
+                                uint8_t selectedAircraftIndex,
+                                const AppConfig &config,
+                                const char *statusText);
+    void drawModernReferenceRadarFrame(TFT_eSprite &canvas, const AppConfig &config);
+    void drawModernReferenceGrid(TFT_eSprite &canvas, const AppConfig &config);
+    void drawModernReferenceRings(TFT_eSprite &canvas);
+    void drawModernReferenceCrosshairs(TFT_eSprite &canvas);
+    void drawModernReferenceCardinals(TFT_eSprite &canvas);
+    void drawModernReferenceScaleLabel(TFT_eSprite &canvas, const AppConfig &config);
+    void drawModernReferenceCenterDot(TFT_eSprite &canvas);
+    void drawModernReferenceAircraft(TFT_eSprite &canvas,
+                                     const Aircraft *aircraft,
+                                     uint8_t aircraftCount,
+                                     const AppConfig &config);
+    void drawModernReferenceAircraftSymbol(TFT_eSprite &canvas,
+                                           const Aircraft &target,
+                                           int16_t x,
+                                           int16_t y);
+    void drawModernReferenceSpeedVector(TFT_eSprite &canvas,
+                                        const Aircraft &target,
+                                        int16_t x,
+                                        int16_t y);
+    void drawModernReferenceAircraftTag(TFT_eSprite &canvas,
+                                        const Aircraft &target,
+                                        int16_t x,
+                                        int16_t y);
+    void drawModernReferenceBeyondDot(TFT_eSprite &canvas, const Aircraft &target);
+    bool modernReferenceToScreen(const Aircraft &target,
+                                 const AppConfig &config,
+                                 int16_t &x,
+                                 int16_t &y,
+                                 bool &insideOuterRing) const;
+    int modernReferenceSpeedLineLengthPx(float speedMs) const;
+    void modernReferenceNoseTip(int16_t x,
+                                int16_t y,
+                                float headingDeg,
+                                int16_t &tipX,
+                                int16_t &tipY) const;
+    void clipModernReferencePointToOuterRing(int16_t x0,
+                                             int16_t y0,
+                                             int16_t &x1,
+                                             int16_t &y1) const;
     void renderCyberpunkPlaceholder(uint8_t aircraftCount, const char *statusText);
 };

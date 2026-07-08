@@ -53,6 +53,13 @@ namespace
                policy == RefreshPolicy::ManualInterval;
     }
 
+    bool isValidScheduleIdleDisplayMode(ScheduleIdleDisplayMode mode)
+    {
+        return mode == ScheduleIdleDisplayMode::PausedStatus ||
+               mode == ScheduleIdleDisplayMode::Clock ||
+               mode == ScheduleIdleDisplayMode::DisplayOff;
+    }
+
     uint32_t defaultBudgetFor(ApiAccountMode mode, uint32_t customBudget)
     {
         switch (mode)
@@ -110,6 +117,7 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.schedule.startMinutesOfDay = 480;
     settings.schedule.endMinutesOfDay = 1200;
     settings.schedule.timezoneOffsetMinutes = 480;
+    settings.schedule.idleDisplayMode = ScheduleIdleDisplayMode::PausedStatus;
 
     settings.display.uiTheme = UiTheme::ClassicRadar;
     settings.display.maxAircraftToDisplay = AircraftModel::kAircraftCount;
@@ -183,6 +191,10 @@ void sanitizeUserSettings(UserSettings &settings)
     if (!isValidRefreshPolicy(settings.api.refreshPolicy))
     {
         settings.api.refreshPolicy = RefreshPolicy::AutoByDailyBudget;
+    }
+    if (!isValidScheduleIdleDisplayMode(settings.schedule.idleDisplayMode))
+    {
+        settings.schedule.idleDisplayMode = ScheduleIdleDisplayMode::PausedStatus;
     }
 
     settings.display.maxAircraftToDisplay = clampValue<uint8_t>(settings.display.maxAircraftToDisplay,
@@ -334,11 +346,12 @@ void printUserSettings(const UserSettings &settings)
                      apiAccountModeName(settings.api.accountMode),
                      settings.api.openSkyClientId[0] != '\0' ? 1 : 0,
                      settings.api.openSkyClientSecret[0] != '\0' ? 1 : 0);
-    DebugLog::printf("  schedule=%u start=%d end=%d tz=%d theme=%s brightness=%u\r\n",
+    DebugLog::printf("  schedule=%u start=%d end=%d tz=%d idle=%s theme=%s brightness=%u\r\n",
                      settings.schedule.enabled ? 1 : 0,
                      settings.schedule.startMinutesOfDay,
                      settings.schedule.endMinutesOfDay,
                      settings.schedule.timezoneOffsetMinutes,
+                     scheduleIdleDisplayModeName(settings.schedule.idleDisplayMode),
                      uiThemeName(settings.display.uiTheme),
                      settings.display.brightness);
     DebugLog::println("[Advanced]");
@@ -445,6 +458,21 @@ const char *refreshPolicyName(RefreshPolicy policy)
     }
 }
 
+const char *scheduleIdleDisplayModeName(ScheduleIdleDisplayMode mode)
+{
+    switch (mode)
+    {
+        case ScheduleIdleDisplayMode::PausedStatus:
+            return "PausedStatus";
+        case ScheduleIdleDisplayMode::Clock:
+            return "Clock";
+        case ScheduleIdleDisplayMode::DisplayOff:
+            return "DisplayOff";
+        default:
+            return "Unknown";
+    }
+}
+
 UiTheme nextUiTheme(UiTheme theme)
 {
     switch (theme)
@@ -456,5 +484,19 @@ UiTheme nextUiTheme(UiTheme theme)
         case UiTheme::CyberpunkRadar:
         default:
             return UiTheme::ClassicRadar;
+    }
+}
+
+ScheduleIdleDisplayMode nextScheduleIdleDisplayMode(ScheduleIdleDisplayMode mode)
+{
+    switch (mode)
+    {
+        case ScheduleIdleDisplayMode::PausedStatus:
+            return ScheduleIdleDisplayMode::Clock;
+        case ScheduleIdleDisplayMode::Clock:
+            return ScheduleIdleDisplayMode::DisplayOff;
+        case ScheduleIdleDisplayMode::DisplayOff:
+        default:
+            return ScheduleIdleDisplayMode::PausedStatus;
     }
 }

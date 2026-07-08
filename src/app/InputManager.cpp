@@ -119,6 +119,11 @@ void InputManager::handleSerialCommand(char command)
             pushEvent(InputEvent::ToggleGroundTraffic);
             break;
 
+        case 'o':
+        case 'O':
+            pushEvent(InputEvent::CycleScheduleIdleDisplayMode);
+            break;
+
         case 's':
         case 'S':
             pushEvent(InputEvent::SaveSettings);

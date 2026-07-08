@@ -15,6 +15,7 @@ enum class InputEvent
     NextUiTheme,
     SwitchRange,
     ToggleGroundTraffic,
+    CycleScheduleIdleDisplayMode,
 
     SaveSettings,
     LoadSettings,

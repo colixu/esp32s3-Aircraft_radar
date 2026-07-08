@@ -267,7 +267,7 @@ void ConfigPortal::handleStatus()
              "\"wifiConfigured\":%s,\"wifiConnected\":%s,\"currentIP\":\"%s\","
              "\"apiMode\":\"%s\",\"centerLat\":%.6f,\"centerLon\":%.6f,"
              "\"maxRangeKm\":%.1f,\"scheduleEnabled\":%s,\"computedRequestIntervalMs\":%lu,"
-             "\"activeRequestIntervalMs\":%lu,"
+             "\"activeRequestIntervalMs\":%lu,\"idleDisplayMode\":\"%s\","
              "\"nvsEnabled\":%s}",
              mode_ == ConfigPortalMode::ApSetup ? "ap_setup" : "sta_settings",
              apSsid_,
@@ -283,6 +283,7 @@ void ConfigPortal::handleStatus()
              settings_->schedule.enabled ? "true" : "false",
              static_cast<unsigned long>(settings_->api.computedRequestIntervalMs),
              static_cast<unsigned long>(activeRequestIntervalMs(*settings_)),
+             scheduleIdleDisplayModeName(settings_->schedule.idleDisplayMode),
              nvsJsonText());
     server_.send(200, "application/json", body);
 }
@@ -424,7 +425,19 @@ void ConfigPortal::renderSimplePage()
                                     settings.schedule.timezoneOffsetMinutes != 540);
     write("</select></label><button type=\"button\" onclick=\"setBrowserTimezone()\">");
     write(text("Use browser timezone", "使用浏览器时区"));
-    write("</button></fieldset>");
+    write("</button><label>");
+    write(text("Outside schedule display", "超出时段显示"));
+    write("<select name=\"idleDisplayMode\">");
+    sendSelectOption("0",
+                     text("Paused status", "暂停状态"),
+                     settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::PausedStatus);
+    sendSelectOption("1",
+                     text("Clock", "时钟"),
+                     settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::Clock);
+    sendSelectOption("2",
+                     text("Screen off", "黑屏"),
+                     settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::DisplayOff);
+    write("</select></label></fieldset>");
 
     write("<fieldset><legend>");
     write(text("Display", "显示"));
@@ -617,6 +630,11 @@ void ConfigPortal::renderAdvancedPage()
     sendNumberInput("endMinute", "endMinute", value, "1");
     snprintf(value, sizeof(value), "%d", settings.schedule.timezoneOffsetMinutes);
     sendNumberInput("timezoneOffsetMinutes", "timezoneOffsetMinutes", value, "1");
+    write("<label>idleDisplayMode<select name=\"idleDisplayMode\">");
+    sendSelectOption("0", "PausedStatus", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::PausedStatus);
+    sendSelectOption("1", "Clock", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::Clock);
+    sendSelectOption("2", "DisplayOff", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::DisplayOff);
+    write("</select></label>");
     write("</fieldset>");
 
     write("<fieldset><legend>Prediction</legend>");
@@ -714,6 +732,8 @@ void ConfigPortal::applySimpleFormToSettings()
     settings.schedule.endMinutesOfDay = argToInt("endHour", settings.schedule.endMinutesOfDay / 60) * 60 +
                                         argToInt("endMinute", settings.schedule.endMinutesOfDay % 60);
     settings.schedule.timezoneOffsetMinutes = argToInt("timezoneOffsetMinutes", settings.schedule.timezoneOffsetMinutes);
+    settings.schedule.idleDisplayMode = static_cast<ScheduleIdleDisplayMode>(
+        argToInt("idleDisplayMode", static_cast<int>(settings.schedule.idleDisplayMode)));
 
     settings.display.uiTheme = static_cast<UiTheme>(argToInt("uiTheme", static_cast<int>(settings.display.uiTheme)));
     settings.display.brightness = static_cast<uint8_t>(argToInt("brightness", settings.display.brightness));
@@ -754,6 +774,8 @@ void ConfigPortal::applyAdvancedFormToSettings()
     settings.schedule.endMinutesOfDay = argToInt("endHour", settings.schedule.endMinutesOfDay / 60) * 60 +
                                         argToInt("endMinute", settings.schedule.endMinutesOfDay % 60);
     settings.schedule.timezoneOffsetMinutes = argToInt("timezoneOffsetMinutes", settings.schedule.timezoneOffsetMinutes);
+    settings.schedule.idleDisplayMode = static_cast<ScheduleIdleDisplayMode>(
+        argToInt("idleDisplayMode", static_cast<int>(settings.schedule.idleDisplayMode)));
 
     settings.prediction.enabled = hasCheckedArg("predictionEnabled");
     settings.prediction.followAlpha = argToFloat("followAlpha", settings.prediction.followAlpha);

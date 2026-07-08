@@ -35,6 +35,13 @@ enum class RefreshPolicy
     ManualInterval
 };
 
+enum class ScheduleIdleDisplayMode
+{
+    PausedStatus,
+    Clock,
+    DisplayOff
+};
+
 enum class DeviceState
 {
     Boot,
@@ -90,6 +97,7 @@ struct ScheduleSettings
     int16_t startMinutesOfDay;
     int16_t endMinutesOfDay;
     int16_t timezoneOffsetMinutes;
+    ScheduleIdleDisplayMode idleDisplayMode;
 };
 
 struct DisplaySettings
@@ -155,4 +163,6 @@ const char *uiThemeName(UiTheme theme);
 const char *apiProviderName(ApiProvider provider);
 const char *apiAccountModeName(ApiAccountMode mode);
 const char *refreshPolicyName(RefreshPolicy policy);
+const char *scheduleIdleDisplayModeName(ScheduleIdleDisplayMode mode);
 UiTheme nextUiTheme(UiTheme theme);
+ScheduleIdleDisplayMode nextScheduleIdleDisplayMode(ScheduleIdleDisplayMode mode);

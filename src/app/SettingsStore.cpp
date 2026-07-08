@@ -100,6 +100,8 @@ bool SettingsStore::load(UserSettings &settings)
     settings.schedule.startMinutesOfDay = preferences_.getShort("start", settings.schedule.startMinutesOfDay);
     settings.schedule.endMinutesOfDay = preferences_.getShort("end", settings.schedule.endMinutesOfDay);
     settings.schedule.timezoneOffsetMinutes = preferences_.getShort("tz", settings.schedule.timezoneOffsetMinutes);
+    settings.schedule.idleDisplayMode = static_cast<ScheduleIdleDisplayMode>(
+        preferences_.getUChar("idle", static_cast<uint8_t>(settings.schedule.idleDisplayMode)));
 
     settings.filter.showGroundTraffic = preferences_.getBool("ground", settings.filter.showGroundTraffic);
     settings.filter.minAirborneAltitudeM = preferences_.getFloat("minalt", settings.filter.minAirborneAltitudeM);
@@ -176,6 +178,7 @@ bool SettingsStore::save(const UserSettings &settings)
     preferences_.putShort("start", settings.schedule.startMinutesOfDay);
     preferences_.putShort("end", settings.schedule.endMinutesOfDay);
     preferences_.putShort("tz", settings.schedule.timezoneOffsetMinutes);
+    preferences_.putUChar("idle", static_cast<uint8_t>(settings.schedule.idleDisplayMode));
 
     preferences_.putBool("ground", settings.filter.showGroundTraffic);
     preferences_.putFloat("minalt", settings.filter.minAirborneAltitudeM);
@@ -199,16 +202,18 @@ bool SettingsStore::save(const UserSettings &settings)
     preferences_.putString("ssid", settings.wifi.ssid);
     preferences_.putString("wpass", settings.wifi.password);
 
-    DebugLog::printf("Settings saved to NVS: ui=%s range=%.0fkm ground=%u\r\n",
+    DebugLog::printf("Settings saved to NVS: ui=%s range=%.0fkm ground=%u idle=%s\r\n",
                      uiThemeName(settings.display.uiTheme),
                      settings.location.maxRangeKm,
-                     settings.filter.showGroundTraffic ? 1 : 0);
+                     settings.filter.showGroundTraffic ? 1 : 0,
+                     scheduleIdleDisplayModeName(settings.schedule.idleDisplayMode));
     return true;
 #else
-    DebugLog::printf("SettingsStore save skipped: NVS disabled, volatile mode. ui=%s range=%.0fkm ground=%u\r\n",
+    DebugLog::printf("SettingsStore save skipped: NVS disabled, volatile mode. ui=%s range=%.0fkm ground=%u idle=%s\r\n",
                      uiThemeName(settings.display.uiTheme),
                      settings.location.maxRangeKm,
-                     settings.filter.showGroundTraffic ? 1 : 0);
+                     settings.filter.showGroundTraffic ? 1 : 0,
+                     scheduleIdleDisplayModeName(settings.schedule.idleDisplayMode));
     return true;
 #endif
 }

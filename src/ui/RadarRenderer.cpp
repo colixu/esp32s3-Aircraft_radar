@@ -5,6 +5,60 @@
 #include "../app/DebugLog.h"
 #include "QrCodeRenderer.h"
 
+namespace
+{
+    struct ModernRadarTheme
+    {
+        static constexpr int16_t size = 240;
+        static constexpr int16_t centerX = 120;
+        static constexpr int16_t centerY = 120;
+        static constexpr int16_t outerRadius = 107;
+        static constexpr uint8_t ringCount = 4;
+        static constexpr float gridStrokeHalfWidth = 1.0f;
+        static constexpr int16_t centerDotRadius = 2;
+        static constexpr int16_t noseLength = 8;
+        static constexpr int16_t tailLength = 3;
+        static constexpr int16_t tailHalfWidth = 4;
+        static constexpr int16_t aircraftLabelGap = 1;
+        static constexpr int16_t insideRingInset = noseLength + tailHalfWidth + 1;
+        static constexpr int16_t beyondRingDotRadius = 4;
+        static constexpr int16_t beyondRingScreenMargin = 2;
+        static constexpr uint32_t trackHorizonSec = 60;
+        static constexpr int16_t speedLineMinPx = 2;
+        static constexpr float trackRefOuterKm = 13.3f;
+        static constexpr float trackLengthScale = 1.5f / 5.0f;
+        static constexpr float trackLineHalfWidth = 1.0f;
+    };
+
+    void drawModernWideLine(TFT_eSprite &canvas,
+                            int16_t x0,
+                            int16_t y0,
+                            int16_t x1,
+                            int16_t y1,
+                            uint16_t color)
+    {
+        canvas.drawLine(x0, y0, x1, y1, color);
+        if (abs(x1 - x0) >= abs(y1 - y0))
+        {
+            canvas.drawLine(x0, y0 + 1, x1, y1 + 1, color);
+        }
+        else
+        {
+            canvas.drawLine(x0 + 1, y0, x1 + 1, y1, color);
+        }
+    }
+
+    void drawModernWideCircle(TFT_eSprite &canvas,
+                              int16_t x,
+                              int16_t y,
+                              int16_t radius,
+                              uint16_t color)
+    {
+        canvas.drawCircle(x, y, radius, color);
+        canvas.drawCircle(x, y, radius - 1, color);
+    }
+}
+
 RadarRenderer::RadarRenderer(TFT_eSPI &display) :
     tft_(display),
     frame_(&display)
@@ -38,7 +92,7 @@ void RadarRenderer::renderRadarFrame(const Aircraft *aircraft,
     switch (theme)
     {
         case UiTheme::ModernRadar:
-            renderModernPlaceholder(aircraftCount, statusText);
+            renderModernRadarFrame(aircraft, aircraftCount, selectedAircraftIndex, config, statusText);
             return;
         case UiTheme::CyberpunkRadar:
             renderCyberpunkPlaceholder(aircraftCount, statusText);
@@ -63,28 +117,364 @@ void RadarRenderer::renderClassicRadarFrame(const Aircraft *aircraft,
     frame_.pushSprite(0, 0);
 }
 
-void RadarRenderer::renderModernPlaceholder(uint8_t aircraftCount, const char *statusText)
+void RadarRenderer::renderModernRadarFrame(const Aircraft *aircraft,
+                                           uint8_t aircraftCount,
+                                           uint8_t selectedAircraftIndex,
+                                           const AppConfig &config,
+                                           const char *statusText)
 {
-    frame_.fillSprite(TFT_BLACK);
+    (void)selectedAircraftIndex;
+    (void)statusText;
 
-    const uint16_t lineColor = tft_.color565(60, 180, 180);
-    const uint16_t textColor = tft_.color565(180, 255, 240);
-    const uint16_t dimColor = tft_.color565(20, 80, 90);
-
-    frame_.drawCircle(kCenterX, kCenterY, 116, lineColor);
-    frame_.drawLine(38, 72, 202, 72, dimColor);
-    frame_.drawLine(38, 168, 202, 168, dimColor);
-    frame_.drawRect(58, 92, 124, 56, dimColor);
-
-    char line[32];
-    frame_.setTextDatum(MC_DATUM);
-    frame_.setTextColor(textColor, TFT_BLACK);
-    frame_.drawString("MODERN MODE", kCenterX, 106, 2);
-    snprintf(line, sizeof(line), "AIRCRAFT %u", aircraftCount);
-    frame_.drawString(line, kCenterX, 128, 1);
-
-    drawStatusText(frame_, statusText);
+    drawModernReferenceRadarFrame(frame_, config);
+    drawModernReferenceAircraft(frame_, aircraft, aircraftCount, config);
     frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::drawModernReferenceRadarFrame(TFT_eSprite &canvas, const AppConfig &config)
+{
+    canvas.fillSprite(modernBg_);
+
+    drawModernReferenceGrid(canvas, config);
+    drawModernReferenceCenterDot(canvas);
+    drawModernReferenceCardinals(canvas);
+    drawModernReferenceScaleLabel(canvas, config);
+}
+
+void RadarRenderer::drawModernReferenceGrid(TFT_eSprite &canvas, const AppConfig &config)
+{
+    (void)config;
+
+    drawModernReferenceRings(canvas);
+    drawModernReferenceCrosshairs(canvas);
+}
+
+void RadarRenderer::drawModernReferenceRings(TFT_eSprite &canvas)
+{
+    for (uint8_t i = 1; i <= ModernRadarTheme::ringCount; ++i)
+    {
+        const int16_t radius = (ModernRadarTheme::outerRadius * i) / ModernRadarTheme::ringCount;
+        drawModernWideCircle(canvas,
+                             ModernRadarTheme::centerX,
+                             ModernRadarTheme::centerY,
+                             radius,
+                             modernGrid_);
+    }
+}
+
+void RadarRenderer::drawModernReferenceCrosshairs(TFT_eSprite &canvas)
+{
+    drawModernWideLine(canvas,
+                       ModernRadarTheme::centerX - ModernRadarTheme::outerRadius,
+                       ModernRadarTheme::centerY,
+                       ModernRadarTheme::centerX + ModernRadarTheme::outerRadius,
+                       ModernRadarTheme::centerY,
+                       modernGrid_);
+    drawModernWideLine(canvas,
+                       ModernRadarTheme::centerX,
+                       ModernRadarTheme::centerY - ModernRadarTheme::outerRadius,
+                       ModernRadarTheme::centerX,
+                       ModernRadarTheme::centerY + ModernRadarTheme::outerRadius,
+                       modernGrid_);
+}
+
+void RadarRenderer::drawModernReferenceCardinals(TFT_eSprite &canvas)
+{
+    canvas.setTextColor(modernText_, modernBg_);
+    canvas.setTextDatum(TC_DATUM);
+    canvas.drawString("N", ModernRadarTheme::centerX, -1, 2);
+    canvas.setTextDatum(BC_DATUM);
+    canvas.drawString("S", ModernRadarTheme::centerX, ModernRadarTheme::size + 3, 2);
+    canvas.setTextDatum(ML_DATUM);
+    canvas.drawString("W", 0, ModernRadarTheme::centerY, 2);
+    canvas.setTextDatum(MR_DATUM);
+    canvas.drawString("E", ModernRadarTheme::size - 1, ModernRadarTheme::centerY, 2);
+}
+
+void RadarRenderer::drawModernReferenceScaleLabel(TFT_eSprite &canvas, const AppConfig &config)
+{
+    char label[16];
+    snprintf(label, sizeof(label), "%.0fkm", max(config.maxRangeKm, 1.0f));
+
+    canvas.setTextDatum(MR_DATUM);
+    const int16_t textWidth = canvas.textWidth(label, 1);
+    const int16_t labelX = ModernRadarTheme::centerX + ModernRadarTheme::outerRadius - 6;
+    const int16_t labelY = ModernRadarTheme::centerY;
+    canvas.fillRect(labelX - textWidth - 2, labelY - 5, textWidth + 4, 11, modernBg_);
+    canvas.setTextColor(modernGrid_, modernBg_);
+    canvas.drawString(label, labelX, labelY, 1);
+}
+
+void RadarRenderer::drawModernReferenceCenterDot(TFT_eSprite &canvas)
+{
+    canvas.fillCircle(ModernRadarTheme::centerX,
+                      ModernRadarTheme::centerY,
+                      ModernRadarTheme::centerDotRadius,
+                      modernCenter_);
+}
+
+void RadarRenderer::drawModernReferenceAircraft(TFT_eSprite &canvas,
+                                                const Aircraft *aircraft,
+                                                uint8_t aircraftCount,
+                                                const AppConfig &config)
+{
+    if (aircraft == nullptr)
+    {
+        return;
+    }
+
+    for (uint8_t i = 0; i < aircraftCount; ++i)
+    {
+        int16_t x = 0;
+        int16_t y = 0;
+        bool insideOuterRing = false;
+        if (modernReferenceToScreen(aircraft[i], config, x, y, insideOuterRing) && !insideOuterRing)
+        {
+            drawModernReferenceBeyondDot(canvas, aircraft[i]);
+        }
+    }
+
+    for (uint8_t i = 0; i < aircraftCount; ++i)
+    {
+        int16_t x = 0;
+        int16_t y = 0;
+        bool insideOuterRing = false;
+        if (modernReferenceToScreen(aircraft[i], config, x, y, insideOuterRing) && insideOuterRing)
+        {
+            drawModernReferenceSpeedVector(canvas, aircraft[i], x, y);
+        }
+    }
+
+    for (uint8_t i = 0; i < aircraftCount; ++i)
+    {
+        int16_t x = 0;
+        int16_t y = 0;
+        bool insideOuterRing = false;
+        if (modernReferenceToScreen(aircraft[i], config, x, y, insideOuterRing) && insideOuterRing)
+        {
+            drawModernReferenceAircraftSymbol(canvas, aircraft[i], x, y);
+            if (config.showLabels)
+            {
+                drawModernReferenceAircraftTag(canvas, aircraft[i], x, y);
+            }
+        }
+    }
+}
+
+void RadarRenderer::drawModernReferenceAircraftSymbol(TFT_eSprite &canvas,
+                                                      const Aircraft &target,
+                                                      int16_t x,
+                                                      int16_t y)
+{
+    const float headingDeg = isfinite(target.headingDeg) ? target.headingDeg : target.bearingDeg;
+    const float heading = headingDeg * DEG_TO_RAD;
+    const float normal = heading + HALF_PI;
+
+    const int16_t noseX = x + static_cast<int16_t>(sinf(heading) * ModernRadarTheme::noseLength);
+    const int16_t noseY = y - static_cast<int16_t>(cosf(heading) * ModernRadarTheme::noseLength);
+    const int16_t tailCenterX = x - static_cast<int16_t>(sinf(heading) * ModernRadarTheme::tailLength);
+    const int16_t tailCenterY = y + static_cast<int16_t>(cosf(heading) * ModernRadarTheme::tailLength);
+    const int16_t tailLeftX = tailCenterX + static_cast<int16_t>(sinf(normal) * ModernRadarTheme::tailHalfWidth);
+    const int16_t tailLeftY = tailCenterY - static_cast<int16_t>(cosf(normal) * ModernRadarTheme::tailHalfWidth);
+    const int16_t tailRightX = tailCenterX - static_cast<int16_t>(sinf(normal) * ModernRadarTheme::tailHalfWidth);
+    const int16_t tailRightY = tailCenterY + static_cast<int16_t>(cosf(normal) * ModernRadarTheme::tailHalfWidth);
+
+    canvas.fillTriangle(noseX, noseY, tailLeftX, tailLeftY, tailRightX, tailRightY, modernAircraft_);
+}
+
+void RadarRenderer::drawModernReferenceSpeedVector(TFT_eSprite &canvas,
+                                                   const Aircraft &target,
+                                                   int16_t x,
+                                                   int16_t y)
+{
+    if (!isfinite(target.speedMs) || target.speedMs <= 0.0f)
+    {
+        return;
+    }
+
+    const float headingDeg = isfinite(target.headingDeg) ? target.headingDeg : target.bearingDeg;
+    int16_t startX = 0;
+    int16_t startY = 0;
+    modernReferenceNoseTip(x, y, headingDeg, startX, startY);
+
+    const float heading = headingDeg * DEG_TO_RAD;
+    const int lineLength = modernReferenceSpeedLineLengthPx(target.speedMs);
+    int16_t endX = startX + static_cast<int16_t>(sinf(heading) * lineLength);
+    int16_t endY = startY - static_cast<int16_t>(cosf(heading) * lineLength);
+    clipModernReferencePointToOuterRing(startX, startY, endX, endY);
+    drawModernWideLine(canvas, startX, startY, endX, endY, modernVector_);
+}
+
+void RadarRenderer::drawModernReferenceAircraftTag(TFT_eSprite &canvas,
+                                                   const Aircraft &target,
+                                                   int16_t x,
+                                                   int16_t y)
+{
+    char callsign[16];
+    char altitude[16];
+    snprintf(callsign,
+             sizeof(callsign),
+             "%s",
+             target.callsign[0] != '\0' ? target.callsign : "UNKNOWN");
+    snprintf(altitude, sizeof(altitude), "%.0fm", target.altitudeM);
+
+    const bool labelRight = x < ModernRadarTheme::centerX;
+    const int16_t symbolHalf = ModernRadarTheme::noseLength + ModernRadarTheme::tailHalfWidth;
+    const int16_t labelWidth = max(canvas.textWidth(callsign, 1), canvas.textWidth(altitude, 1));
+    const int16_t blockHeight = 20;
+    int16_t anchorX = labelRight ?
+                      x + symbolHalf + ModernRadarTheme::aircraftLabelGap :
+                      x - symbolHalf - ModernRadarTheme::aircraftLabelGap;
+    int16_t labelY = constrain(y - blockHeight / 2, 2, ModernRadarTheme::size - blockHeight - 2);
+
+    if (labelRight)
+    {
+        anchorX = constrain(anchorX, 2, ModernRadarTheme::size - labelWidth - 2);
+        canvas.fillRect(anchorX - 1, labelY - 1, labelWidth + 2, blockHeight + 2, modernBg_);
+        canvas.setTextDatum(TL_DATUM);
+        canvas.setTextColor(modernText_, modernBg_);
+        canvas.drawString(callsign, anchorX, labelY, 1);
+        canvas.setTextColor(modernTagAlt_, modernBg_);
+        canvas.drawString(altitude, anchorX, labelY + 10, 1);
+        return;
+    }
+
+    anchorX = constrain(anchorX, labelWidth + 2, ModernRadarTheme::size - 2);
+    canvas.fillRect(anchorX - labelWidth - 1, labelY - 1, labelWidth + 2, blockHeight + 2, modernBg_);
+    canvas.setTextDatum(TR_DATUM);
+    canvas.setTextColor(modernText_, modernBg_);
+    canvas.drawString(callsign, anchorX, labelY, 1);
+    canvas.setTextColor(modernTagAlt_, modernBg_);
+    canvas.drawString(altitude, anchorX, labelY + 10, 1);
+}
+
+void RadarRenderer::drawModernReferenceBeyondDot(TFT_eSprite &canvas, const Aircraft &target)
+{
+    if (!isfinite(target.bearingDeg))
+    {
+        return;
+    }
+
+    const float bearing = target.bearingDeg * DEG_TO_RAD;
+    const float dx = sinf(bearing);
+    const float dy = -cosf(bearing);
+    const float maxX = static_cast<float>(ModernRadarTheme::size - 1 - ModernRadarTheme::beyondRingScreenMargin);
+    const float minX = static_cast<float>(ModernRadarTheme::beyondRingScreenMargin);
+    const float maxY = maxX;
+    const float minY = minX;
+    float edgeScale = 1000.0f;
+
+    if (dx > 0.001f)
+    {
+        edgeScale = min(edgeScale, (maxX - ModernRadarTheme::centerX) / dx);
+    }
+    else if (dx < -0.001f)
+    {
+        edgeScale = min(edgeScale, (minX - ModernRadarTheme::centerX) / dx);
+    }
+    if (dy > 0.001f)
+    {
+        edgeScale = min(edgeScale, (maxY - ModernRadarTheme::centerY) / dy);
+    }
+    else if (dy < -0.001f)
+    {
+        edgeScale = min(edgeScale, (minY - ModernRadarTheme::centerY) / dy);
+    }
+
+    const int16_t x = ModernRadarTheme::centerX + static_cast<int16_t>(dx * edgeScale);
+    const int16_t y = ModernRadarTheme::centerY + static_cast<int16_t>(dy * edgeScale);
+    canvas.fillCircle(x, y, ModernRadarTheme::beyondRingDotRadius, modernAircraft_);
+}
+
+bool RadarRenderer::modernReferenceToScreen(const Aircraft &target,
+                                            const AppConfig &config,
+                                            int16_t &x,
+                                            int16_t &y,
+                                            bool &insideOuterRing) const
+{
+    if (!target.valid || !isfinite(target.distanceKm) || !isfinite(target.bearingDeg))
+    {
+        return false;
+    }
+
+    const float maxRangeKm = max(config.maxRangeKm, 1.0f);
+    const float rawRadius = (target.distanceKm / maxRangeKm) *
+                            static_cast<float>(ModernRadarTheme::outerRadius);
+    insideOuterRing = rawRadius <= static_cast<float>(ModernRadarTheme::outerRadius);
+
+    const float radius = constrain(rawRadius,
+                                   0.0f,
+                                   static_cast<float>(ModernRadarTheme::outerRadius -
+                                                      ModernRadarTheme::insideRingInset));
+    const float bearing = target.bearingDeg * DEG_TO_RAD;
+    x = ModernRadarTheme::centerX + static_cast<int16_t>(sinf(bearing) * radius);
+    y = ModernRadarTheme::centerY - static_cast<int16_t>(cosf(bearing) * radius);
+    return true;
+}
+
+int RadarRenderer::modernReferenceSpeedLineLengthPx(float speedMs) const
+{
+    if (!isfinite(speedMs) || speedMs <= 0.0f)
+    {
+        return 0;
+    }
+
+    const float distanceKm = speedMs * static_cast<float>(ModernRadarTheme::trackHorizonSec) / 1000.0f;
+    const float rawPx = (distanceKm / ModernRadarTheme::trackRefOuterKm) *
+                        static_cast<float>(ModernRadarTheme::outerRadius);
+    const float scaled = rawPx * ModernRadarTheme::trackLengthScale;
+    return constrain(static_cast<int>(scaled),
+                     ModernRadarTheme::speedLineMinPx,
+                     ModernRadarTheme::outerRadius);
+}
+
+void RadarRenderer::modernReferenceNoseTip(int16_t x,
+                                           int16_t y,
+                                           float headingDeg,
+                                           int16_t &tipX,
+                                           int16_t &tipY) const
+{
+    const float heading = headingDeg * DEG_TO_RAD;
+    tipX = x + static_cast<int16_t>(sinf(heading) * ModernRadarTheme::noseLength);
+    tipY = y - static_cast<int16_t>(cosf(heading) * ModernRadarTheme::noseLength);
+}
+
+void RadarRenderer::clipModernReferencePointToOuterRing(int16_t x0,
+                                                        int16_t y0,
+                                                        int16_t &x1,
+                                                        int16_t &y1) const
+{
+    const float dx = static_cast<float>(x1 - x0);
+    const float dy = static_cast<float>(y1 - y0);
+    const float endDx = static_cast<float>(x1 - ModernRadarTheme::centerX);
+    const float endDy = static_cast<float>(y1 - ModernRadarTheme::centerY);
+    const float limit = static_cast<float>((ModernRadarTheme::outerRadius - 1) *
+                                           (ModernRadarTheme::outerRadius - 1));
+
+    if (endDx * endDx + endDy * endDy <= limit)
+    {
+        return;
+    }
+
+    float low = 0.0f;
+    float high = 1.0f;
+    for (uint8_t i = 0; i < 8; ++i)
+    {
+        const float mid = (low + high) * 0.5f;
+        const float testX = static_cast<float>(x0) + dx * mid - ModernRadarTheme::centerX;
+        const float testY = static_cast<float>(y0) + dy * mid - ModernRadarTheme::centerY;
+        if (testX * testX + testY * testY <= limit)
+        {
+            low = mid;
+        }
+        else
+        {
+            high = mid;
+        }
+    }
+
+    x1 = x0 + static_cast<int16_t>(dx * low);
+    y1 = y0 + static_cast<int16_t>(dy * low);
 }
 
 void RadarRenderer::renderCyberpunkPlaceholder(uint8_t aircraftCount, const char *statusText)
@@ -282,6 +672,55 @@ void RadarRenderer::renderSystemStatusFrame(const char *line1,
     frame_.pushSprite(0, 0);
 }
 
+void RadarRenderer::renderClockFrame(const char *timeText,
+                                     const char *dateText,
+                                     const char *nextRunText,
+                                     const char *hintText)
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    frame_.fillSprite(TFT_BLACK);
+    frame_.drawCircle(kCenterX, kCenterY, 116, dimGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
+
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString("IDLE", kCenterX, 52, 1);
+
+    frame_.setTextColor(sweepGreen_, TFT_BLACK);
+    frame_.drawString(timeText != nullptr ? timeText : "--:--", kCenterX, 104, 4);
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    if (dateText != nullptr && dateText[0] != '\0')
+    {
+        frame_.drawString(dateText, kCenterX, 138, 1);
+    }
+    if (nextRunText != nullptr && nextRunText[0] != '\0')
+    {
+        frame_.drawString(nextRunText, kCenterX, 164, 1);
+    }
+    if (hintText != nullptr && hintText[0] != '\0')
+    {
+        frame_.drawString(hintText, kCenterX, 190, 1);
+    }
+
+    frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::renderBlankFrame()
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    frame_.fillSprite(TFT_BLACK);
+    frame_.pushSprite(0, 0);
+}
+
 void RadarRenderer::printDisplaySetup()
 {
     setup_t setup;
@@ -354,6 +793,14 @@ void RadarRenderer::initColors()
     aircraftGreen_ = tft_.color565(0, 210, 70);
     selectedGreen_ = tft_.color565(140, 255, 160);
     labelGreen_ = tft_.color565(0, 120, 48);
+    modernBg_ = tft_.color565(0, 0, 0);
+    modernGrid_ = tft_.color565(16, 100, 32);
+    modernText_ = tft_.color565(255, 255, 255);
+    modernCenter_ = tft_.color565(255, 255, 255);
+    modernAircraft_ = tft_.color565(255, 0, 0);
+    modernVector_ = tft_.color565(255, 0, 255);
+    modernTagType_ = tft_.color565(255, 200, 0);
+    modernTagAlt_ = tft_.color565(90, 200, 255);
 
     for (uint8_t i = 0; i < kScanTrailCount; ++i)
     {

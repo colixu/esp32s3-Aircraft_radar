@@ -60,6 +60,7 @@ private:
     uint32_t lastPredictionSummaryMs_ = 0;
     uint32_t lastScheduleCheckMs_ = 0;
     uint32_t lastTimeSyncLogMs_ = 0;
+    uint32_t lastIdleDisplayRenderMs_ = 0;
     uint32_t wifiLostSinceMs_ = 0;
     uint32_t currentRealApiIntervalMs_ = 0;
 
@@ -73,9 +74,11 @@ private:
     void switchUiTheme();
     void switchRange();
     void toggleGroundTraffic();
+    void cycleScheduleIdleDisplayMode();
     void toggleSetupDisplayMode();
     void showStaSettingsOverlay();
     void hideStaSettingsOverlay();
+    bool hasActiveOverlay() const;
     void renderSettingsDisplay(const char *statusText);
     void beginStaSettingsServer();
     void resetSettingsToDefault();
@@ -94,6 +97,7 @@ private:
     void ensureRealRadarUpdaterRunning();
     void stopRealRadarUpdater();
     void renderRealRadarSystemStatus();
+    void renderPausedIdleFrame(bool force);
     void formatMinutesOfDay(int16_t minutes, char *buffer, size_t bufferSize) const;
     void updateRadarDemo(uint32_t now);
     void updateApiTest(uint32_t now);

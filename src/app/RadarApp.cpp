@@ -246,6 +246,10 @@ void RadarApp::handleInputEvent(InputEvent event)
             toggleGroundTraffic();
             break;
 
+        case InputEvent::CycleScheduleIdleDisplayMode:
+            cycleScheduleIdleDisplayMode();
+            break;
+
         case InputEvent::SaveSettings:
             DebugLog::println("Manual settings save requested.");
             settingsStore_.save(settings_);
@@ -261,7 +265,14 @@ void RadarApp::handleInputEvent(InputEvent event)
                 timeManager_.begin(settings_);
                 stopRealRadarUpdater();
                 updateRealRadarRunGate(millis(), true);
-                renderRealRadarSystemStatus();
+                if (deviceState_ == DeviceState::PausedBySchedule)
+                {
+                    renderPausedIdleFrame(true);
+                }
+                else
+                {
+                    renderRealRadarSystemStatus();
+                }
             }
             break;
 
@@ -309,6 +320,7 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  u: switch UI theme");
     DebugLog::println("  r: switch radar range");
     DebugLog::println("  g: toggle ground traffic");
+    DebugLog::println("  o: cycle outside-schedule display");
     DebugLog::println("  s: save settings");
     DebugLog::println("  l: load settings");
     DebugLog::println("  t: print time/schedule status");
@@ -356,6 +368,19 @@ void RadarApp::toggleGroundTraffic()
     settings_.filter.showGroundTraffic = !settings_.filter.showGroundTraffic;
     DebugLog::printf("showGroundTraffic=%u\r\n", settings_.filter.showGroundTraffic ? 1 : 0);
     settingsStore_.save(settings_);
+}
+
+void RadarApp::cycleScheduleIdleDisplayMode()
+{
+    settings_.schedule.idleDisplayMode = nextScheduleIdleDisplayMode(settings_.schedule.idleDisplayMode);
+    DebugLog::printf("Outside-schedule display: %s\r\n",
+                     scheduleIdleDisplayModeName(settings_.schedule.idleDisplayMode));
+    settingsStore_.save(settings_);
+
+    if (config_.appMode == AppMode::RealRadar && deviceState_ == DeviceState::PausedBySchedule)
+    {
+        renderPausedIdleFrame(true);
+    }
 }
 
 void RadarApp::toggleSetupDisplayMode()
@@ -414,12 +439,24 @@ void RadarApp::hideStaSettingsOverlay()
     DebugLog::println("STA settings overlay hidden.");
     if (config_.appMode == AppMode::RealRadar)
     {
-        renderRealRadarFrame();
+        if (deviceState_ == DeviceState::PausedBySchedule)
+        {
+            renderPausedIdleFrame(true);
+        }
+        else
+        {
+            renderRealRadarFrame();
+        }
     }
     else if (config_.appMode == AppMode::RadarDemo)
     {
         renderFrame();
     }
+}
+
+bool RadarApp::hasActiveOverlay() const
+{
+    return deviceState_ == DeviceState::SetupPortal || staSettingsOverlayVisible_;
 }
 
 void RadarApp::renderSettingsDisplay(const char *statusText)
@@ -485,15 +522,18 @@ void RadarApp::printTimeStatus()
                      settings_.schedule.startMinutesOfDay,
                      settings_.schedule.endMinutesOfDay,
                      nextStart);
+    DebugLog::printf("  outside-schedule display=%s\r\n",
+                     scheduleIdleDisplayModeName(settings_.schedule.idleDisplayMode));
 }
 
 void RadarApp::printDeviceStateStatus()
 {
     DebugLog::println("Device mode/status:");
-    DebugLog::printf("  appMode=%d state=%s wifi=%s\r\n",
+    DebugLog::printf("  appMode=%d state=%s wifi=%s staOverlay=%u\r\n",
                      static_cast<int>(config_.appMode),
                      deviceStateName(deviceState_),
-                     wifi_.statusText());
+                     wifi_.statusText(),
+                     staSettingsOverlayVisible_ ? 1 : 0);
     DebugLog::printf("  updater running=%u updating=%u interval=%lums\r\n",
                      realApiUpdater_.isRunning() ? 1 : 0,
                      realApiUpdater_.isUpdating() ? 1 : 0,
@@ -589,6 +629,10 @@ void RadarApp::setDeviceState(DeviceState state, const char *reason)
 
     const DeviceState previous = deviceState_;
     deviceState_ = state;
+    if (state == DeviceState::PausedBySchedule && previous != DeviceState::PausedBySchedule)
+    {
+        lastIdleDisplayRenderMs_ = 0;
+    }
     if (reason != nullptr && reason[0] != '\0')
     {
         DebugLog::printf("DeviceState: %s -> %s (%s)\r\n",
@@ -755,18 +799,68 @@ void RadarApp::renderRealRadarSystemStatus()
 
     if (deviceState_ == DeviceState::PausedBySchedule)
     {
-        char nextStart[8];
-        char line3[24];
-        formatMinutesOfDay(computeNextScheduleStartMinutes(settings_.schedule,
-                                                           timeManager_.getLocalMinutesOfDay()),
-                           nextStart,
-                           sizeof(nextStart));
-        snprintf(line3, sizeof(line3), "Next: %s", nextStart);
-        renderer_.renderSystemStatusFrame("PAUSED", "Outside schedule", line3);
+        renderPausedIdleFrame(true);
         return;
     }
 
     renderer_.renderSystemStatusFrame("STATUS", realRadarStatus_, "");
+}
+
+void RadarApp::renderPausedIdleFrame(bool force)
+{
+    if (!renderer_.isReady())
+    {
+        return;
+    }
+
+    if (hasActiveOverlay())
+    {
+        if (staSettingsOverlayVisible_)
+        {
+            renderSettingsDisplay(nullptr);
+        }
+        return;
+    }
+
+    timeManager_.update();
+
+    char nextStart[8];
+    formatMinutesOfDay(computeNextScheduleStartMinutes(settings_.schedule,
+                                                       timeManager_.getLocalMinutesOfDay()),
+                       nextStart,
+                       sizeof(nextStart));
+
+    switch (settings_.schedule.idleDisplayMode)
+    {
+        case ScheduleIdleDisplayMode::Clock:
+        {
+            char localTime[8];
+            char nextRun[24];
+            timeManager_.formatLocalTime(localTime, sizeof(localTime));
+            snprintf(nextRun, sizeof(nextRun), "Next run: %s", nextStart);
+            renderer_.renderClockFrame(localTime, "", nextRun, "w: settings");
+            lastIdleDisplayRenderMs_ = millis();
+            break;
+        }
+
+        case ScheduleIdleDisplayMode::DisplayOff:
+            if (force || lastIdleDisplayRenderMs_ == 0 || millis() - lastIdleDisplayRenderMs_ >= 60000)
+            {
+                renderer_.renderBlankFrame();
+                lastIdleDisplayRenderMs_ = millis();
+            }
+            break;
+
+        case ScheduleIdleDisplayMode::PausedStatus:
+        default:
+        {
+            char line3[24];
+            snprintf(line3, sizeof(line3), "Next: %s", nextStart);
+            renderer_.renderSystemStatusFrame("PAUSED", "Outside schedule", line3);
+            lastIdleDisplayRenderMs_ = millis();
+            break;
+        }
+    }
 }
 
 void RadarApp::formatMinutesOfDay(int16_t minutes, char *buffer, size_t bufferSize) const
@@ -884,7 +978,14 @@ void RadarApp::updateRealRadar(uint32_t now)
         if (now - lastFrameMs_ >= config_.frameIntervalMs)
         {
             lastFrameMs_ = now;
-            renderRealRadarSystemStatus();
+            if (deviceState_ == DeviceState::PausedBySchedule)
+            {
+                renderPausedIdleFrame(false);
+            }
+            else
+            {
+                renderRealRadarSystemStatus();
+            }
         }
         return;
     }
