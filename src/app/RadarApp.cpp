@@ -10,6 +10,13 @@ namespace
 {
     constexpr uint32_t kScheduleCheckIntervalMs = 5000;
 
+    bool keyMatches(const char *key, const char *a, const char *b = nullptr, const char *c = nullptr)
+    {
+        return (a != nullptr && strcmp(key, a) == 0) ||
+               (b != nullptr && strcmp(key, b) == 0) ||
+               (c != nullptr && strcmp(key, c) == 0);
+    }
+
     const char *deviceStateName(DeviceState state)
     {
         switch (state)
@@ -48,6 +55,8 @@ void RadarApp::begin()
     delay(800);
     DebugLog::println();
     DebugLog::println("ESP32-S3 GC9A01 aircraft radar");
+    loadDefaultRadarUiTuning(uiTuning_);
+    renderer_.setUiTuning(&uiTuning_);
     settingsStore_.begin();
     settingsStore_.load(settings_);
     inputManager_.begin(settings_);
@@ -88,6 +97,12 @@ void RadarApp::update()
 {
     const uint32_t now = millis();
     updateInput();
+
+    if (debugMode_ == DebugMode::UiLab)
+    {
+        updateUiLab(now);
+        return;
+    }
 
     if (configPortal_.isRunning() && configPortal_.mode() == ConfigPortalMode::StaSettings)
     {
@@ -197,6 +212,12 @@ void RadarApp::updateInput()
     {
         handleInputEvent(event);
     }
+
+    UiTuningCommand command;
+    while (inputManager_.popUiTuningCommand(command))
+    {
+        handleUiTuningCommand(command);
+    }
 }
 
 void RadarApp::handleInputEvent(InputEvent event)
@@ -223,6 +244,26 @@ void RadarApp::handleInputEvent(InputEvent event)
             toggleSetupDisplayMode();
             break;
 
+        case InputEvent::ToggleUiLab:
+            toggleUiLab();
+            break;
+
+        case InputEvent::NextUiLabScene:
+            nextUiLabScene();
+            break;
+
+        case InputEvent::PrintUiTuning:
+            printRadarUiTuning(uiTuning_);
+            break;
+
+        case InputEvent::SaveUiTuning:
+            saveUiTuning();
+            break;
+
+        case InputEvent::ResetUiTuning:
+            resetUiTuning();
+            break;
+
         case InputEvent::ExitCurrentView:
             if (deviceState_ == DeviceState::SetupPortal)
             {
@@ -235,7 +276,14 @@ void RadarApp::handleInputEvent(InputEvent event)
             break;
 
         case InputEvent::NextUiTheme:
-            switchUiTheme();
+            if (debugMode_ == DebugMode::UiLab)
+            {
+                nextUiLabTheme();
+            }
+            else
+            {
+                switchUiTheme();
+            }
             break;
 
         case InputEvent::SwitchRange:
@@ -318,6 +366,20 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  q: toggle setup QR/details");
     DebugLog::println("  w: show STA settings URL QR");
     DebugLog::println("  u: switch UI theme");
+    DebugLog::println("UI Lab:");
+    DebugLog::println("  y: toggle UI Lab");
+    DebugLog::println("  f: next UI Lab fake scene");
+    DebugLog::println("  j: print UI tuning");
+    DebugLog::println("  k: save UI tuning (not persisted yet)");
+    DebugLog::println("  n: reset UI tuning");
+    DebugLog::println("  set modern.bg R G B");
+    DebugLog::println("  set modern.grid R G B");
+    DebugLog::println("  set modern.globalBrightness VALUE");
+    DebugLog::println("  set modern.outerRadius VALUE");
+    DebugLog::println("  set cyber.bg R G B");
+    DebugLog::println("  set cyber.sweep R G B");
+    DebugLog::println("  set cyber.globalBrightness VALUE");
+    DebugLog::println("  set cyber.outerRadius VALUE");
     DebugLog::println("  r: switch radar range");
     DebugLog::println("  g: toggle ground traffic");
     DebugLog::println("  o: cycle outside-schedule display");
@@ -329,6 +391,455 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  A: clear OpenSky token");
     DebugLog::println("  d: reset settings to default");
     DebugLog::println("  b: reboot device");
+}
+
+void RadarApp::toggleUiLab()
+{
+    if (debugMode_ == DebugMode::UiLab)
+    {
+        exitUiLab();
+        return;
+    }
+
+    enterUiLab();
+}
+
+void RadarApp::enterUiLab()
+{
+    uiLabPreviousDeviceState_ = deviceState_;
+    stopRealRadarUpdater();
+    staSettingsOverlayVisible_ = false;
+    uiLabTheme_ = settings_.display.uiTheme;
+    uiLabSceneIndex_ = 0;
+    loadUiLabScene(uiLabSceneIndex_);
+    selectedAircraftIndex_ = 0;
+    debugMode_ = DebugMode::UiLab;
+    lastFrameMs_ = 0;
+
+    if (!renderer_.isReady())
+    {
+        renderer_.begin();
+    }
+
+    DebugLog::println("UI Lab entered. WiFi/API/schedule are bypassed.");
+    DebugLog::printf("UI Lab theme: %s scene=%u\r\n", uiThemeName(uiLabTheme_), uiLabSceneIndex_);
+    renderUiLabFrame();
+}
+
+void RadarApp::exitUiLab()
+{
+    debugMode_ = DebugMode::None;
+    DebugLog::println("UI Lab exited.");
+
+    if (deviceState_ == DeviceState::SetupPortal)
+    {
+        renderSetupPortalFrame(nullptr);
+        return;
+    }
+
+    if (config_.appMode == AppMode::RealRadar)
+    {
+        lastScheduleCheckMs_ = 0;
+        if (updateRealRadarRunGate(millis(), true))
+        {
+            renderRealRadarFrame();
+        }
+        else
+        {
+            renderRealRadarSystemStatus();
+        }
+        return;
+    }
+
+    if (config_.appMode == AppMode::ApiTest)
+    {
+        renderApiTestScreen();
+        return;
+    }
+
+    renderFrame();
+}
+
+void RadarApp::updateUiLab(uint32_t now)
+{
+    if (now - lastFrameMs_ < config_.frameIntervalMs)
+    {
+        return;
+    }
+
+    lastFrameMs_ = now;
+    renderUiLabFrame();
+    renderer_.advanceSweep(config_.sweepStepDeg);
+}
+
+void RadarApp::renderUiLabFrame()
+{
+    AppConfig renderConfig = runtimeRenderConfig();
+    renderConfig.maxRangeKm = 60.0f;
+    renderConfig.showLabels = true;
+    renderer_.renderRadarFrame(uiLabAircraft_,
+                               uiLabAircraftCount_,
+                               selectedAircraftIndex_,
+                               renderConfig,
+                               uiLabTheme_,
+                               "UI LAB");
+}
+
+void RadarApp::loadUiLabScene(uint8_t sceneIndex)
+{
+    AircraftModel::clearAircraft(uiLabAircraft_, AircraftModel::kAircraftCount);
+    uiLabAircraftCount_ = AircraftModel::kAircraftCount;
+
+    if (sceneIndex % 2 == 0)
+    {
+        AircraftModel::setAircraft(uiLabAircraft_[0], "ANA123", 8.0f, 20.0f, 1200.0f, 130.0f, 80.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[1], "JAL456", 18.0f, 90.0f, 2500.0f, 160.0f, 140.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[2], "SKY729", 26.0f, 50.0f, 2476.0f, 150.0f, 110.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[3], "SFJ897", 14.0f, 130.0f, 1547.0f, 120.0f, 300.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[4], "CES320", 35.0f, 210.0f, 5200.0f, 180.0f, 260.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[5], "CCA998", 48.0f, 300.0f, 6900.0f, 210.0f, 20.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[6], "APJ501", 5.0f, 270.0f, 800.0f, 90.0f, 315.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[7], "FDA642", 58.0f, 350.0f, 8300.0f, 230.0f, 45.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[8], "SNA210", 42.0f, 160.0f, 4100.0f, 145.0f, 190.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[9], "ADO777", 62.0f, 75.0f, 9100.0f, 240.0f, 120.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[10], "IBX331", 22.0f, 240.0f, 3100.0f, 110.0f, 280.0f, true);
+        AircraftModel::setAircraft(uiLabAircraft_[11], "JTA082", 12.0f, 330.0f, 2300.0f, 135.0f, 10.0f, true);
+        return;
+    }
+
+    AircraftModel::setAircraft(uiLabAircraft_[0], "NEAR01", 3.0f, 5.0f, 600.0f, 60.0f, 45.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[1], "EAST22", 12.0f, 88.0f, 1400.0f, 80.0f, 90.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[2], "WEST33", 12.0f, 272.0f, 1500.0f, 80.0f, 270.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[3], "SOUTH4", 25.0f, 180.0f, 3300.0f, 130.0f, 220.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[4], "NORTH5", 25.0f, 0.0f, 3500.0f, 140.0f, 20.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[5], "EDGE66", 59.0f, 45.0f, 7800.0f, 220.0f, 90.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[6], "EDGE77", 59.0f, 135.0f, 7900.0f, 220.0f, 180.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[7], "EDGE88", 59.0f, 225.0f, 8000.0f, 220.0f, 270.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[8], "EDGE99", 59.0f, 315.0f, 8100.0f, 220.0f, 0.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[9], "OUT101", 72.0f, 60.0f, 9000.0f, 250.0f, 80.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[10], "OUT202", 75.0f, 250.0f, 9200.0f, 245.0f, 260.0f, true);
+    AircraftModel::setAircraft(uiLabAircraft_[11], "LAB303", 34.0f, 295.0f, 4200.0f, 150.0f, 330.0f, true);
+}
+
+void RadarApp::nextUiLabTheme()
+{
+    if (debugMode_ != DebugMode::UiLab)
+    {
+        return;
+    }
+
+    uiLabTheme_ = nextUiTheme(uiLabTheme_);
+    DebugLog::printf("UI Lab theme: %s\r\n", uiThemeName(uiLabTheme_));
+    renderUiLabFrame();
+}
+
+void RadarApp::nextUiLabScene()
+{
+    if (debugMode_ != DebugMode::UiLab)
+    {
+        DebugLog::println("f ignored: enter UI Lab with y first.");
+        return;
+    }
+
+    uiLabSceneIndex_ = (uiLabSceneIndex_ + 1) % 2;
+    loadUiLabScene(uiLabSceneIndex_);
+    DebugLog::printf("UI Lab scene: %u\r\n", uiLabSceneIndex_);
+    renderUiLabFrame();
+}
+
+void RadarApp::resetUiTuning()
+{
+    loadDefaultRadarUiTuning(uiTuning_);
+    renderer_.setUiTuning(&uiTuning_);
+    DebugLog::println("UI tuning reset to defaults.");
+    printRadarUiTuning(uiTuning_);
+    if (debugMode_ == DebugMode::UiLab)
+    {
+        renderUiLabFrame();
+    }
+}
+
+void RadarApp::saveUiTuning()
+{
+    DebugLog::println("UI tuning NVS save is not implemented in this first UI Lab version.");
+    DebugLog::println("Use j to print values, then copy the chosen defaults into RadarUiTuning.cpp.");
+    printRadarUiTuning(uiTuning_);
+}
+
+void RadarApp::handleUiTuningCommand(const UiTuningCommand &command)
+{
+    if (applyUiTuningColor(command.key, command) || applyUiTuningValue(command.key, command))
+    {
+        sanitizeRadarUiTuning(uiTuning_);
+        DebugLog::printf("UI tuning updated: %s\r\n", command.key);
+        if (debugMode_ == DebugMode::UiLab)
+        {
+            renderUiLabFrame();
+        }
+        else
+        {
+            DebugLog::println("Runtime tuning updated. Enter UI Lab with y or switch theme to preview it.");
+        }
+        return;
+    }
+
+    DebugLog::printf("Unknown UI tuning key: %s\r\n", command.key);
+}
+
+bool RadarApp::applyUiTuningColor(const char *key, const UiTuningCommand &command)
+{
+    if (command.valueCount != 3)
+    {
+        return false;
+    }
+
+    RgbColor *color = nullptr;
+    if (keyMatches(key, "modern.bg", "modern.background", "bg"))
+    {
+        color = &uiTuning_.modern.background;
+    }
+    else if (keyMatches(key, "modern.grid", "grid"))
+    {
+        color = &uiTuning_.modern.grid;
+    }
+    else if (keyMatches(key, "modern.text", "text"))
+    {
+        color = &uiTuning_.modern.text;
+    }
+    else if (keyMatches(key, "modern.aircraft", "aircraft"))
+    {
+        color = &uiTuning_.modern.aircraft;
+    }
+    else if (keyMatches(key, "modern.vector", "vector"))
+    {
+        color = &uiTuning_.modern.vector;
+    }
+    else if (keyMatches(key, "modern.altitude", "modern.altitudeText", "altitude"))
+    {
+        color = &uiTuning_.modern.altitudeText;
+    }
+    else if (keyMatches(key, "modern.selected", "selected"))
+    {
+        color = &uiTuning_.modern.selected;
+    }
+    else if (keyMatches(key, "cyber.bg", "cyber.background"))
+    {
+        color = &uiTuning_.cyberpunk.background;
+    }
+    else if (keyMatches(key, "cyber.noise", "cyber.backgroundNoise"))
+    {
+        color = &uiTuning_.cyberpunk.backgroundNoise;
+    }
+    else if (keyMatches(key, "cyber.outer", "cyber.outerRing"))
+    {
+        color = &uiTuning_.cyberpunk.outerRing;
+    }
+    else if (keyMatches(key, "cyber.ring"))
+    {
+        color = &uiTuning_.cyberpunk.ring;
+    }
+    else if (keyMatches(key, "cyber.ringDim"))
+    {
+        color = &uiTuning_.cyberpunk.ringDim;
+    }
+    else if (keyMatches(key, "cyber.cross", "cyber.crosshair"))
+    {
+        color = &uiTuning_.cyberpunk.crosshair;
+    }
+    else if (keyMatches(key, "cyber.tick"))
+    {
+        color = &uiTuning_.cyberpunk.tick;
+    }
+    else if (keyMatches(key, "cyber.magenta"))
+    {
+        color = &uiTuning_.cyberpunk.magenta;
+    }
+    else if (keyMatches(key, "cyber.aircraft"))
+    {
+        color = &uiTuning_.cyberpunk.aircraft;
+    }
+    else if (keyMatches(key, "cyber.aircraftGlow"))
+    {
+        color = &uiTuning_.cyberpunk.aircraftGlow;
+    }
+    else if (keyMatches(key, "cyber.text"))
+    {
+        color = &uiTuning_.cyberpunk.text;
+    }
+    else if (keyMatches(key, "cyber.altitude", "cyber.altitudeText"))
+    {
+        color = &uiTuning_.cyberpunk.altitudeText;
+    }
+    else if (keyMatches(key, "cyber.selected"))
+    {
+        color = &uiTuning_.cyberpunk.selected;
+    }
+    else if (keyMatches(key, "cyber.sweep"))
+    {
+        color = &uiTuning_.cyberpunk.sweep;
+    }
+
+    if (color == nullptr)
+    {
+        return false;
+    }
+
+    color->r = static_cast<uint8_t>(constrain(static_cast<int>(command.values[0]), 0, 255));
+    color->g = static_cast<uint8_t>(constrain(static_cast<int>(command.values[1]), 0, 255));
+    color->b = static_cast<uint8_t>(constrain(static_cast<int>(command.values[2]), 0, 255));
+    return true;
+}
+
+bool RadarApp::applyUiTuningValue(const char *key, const UiTuningCommand &command)
+{
+    if (command.valueCount != 1)
+    {
+        return false;
+    }
+
+    const float value = command.values[0];
+    if (keyMatches(key, "modern.globalBrightness", "globalBrightness"))
+    {
+        uiTuning_.modern.globalBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "modern.backgroundBrightness", "backgroundBrightness"))
+    {
+        uiTuning_.modern.backgroundBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "modern.gridBrightness", "gridBrightness"))
+    {
+        uiTuning_.modern.gridBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "modern.textBrightness", "textBrightness"))
+    {
+        uiTuning_.modern.textBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "modern.outerRadius", "outerRadius"))
+    {
+        uiTuning_.modern.outerRadius = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "modern.ringCount", "ringCount"))
+    {
+        uiTuning_.modern.ringCount = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "modern.lineWidth", "lineWidth"))
+    {
+        uiTuning_.modern.lineWidth = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "modern.centerDotRadius", "centerDotRadius"))
+    {
+        uiTuning_.modern.centerDotRadius = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "modern.aircraftScale", "aircraftScale"))
+    {
+        uiTuning_.modern.aircraftScale = value;
+        return true;
+    }
+    if (keyMatches(key, "modern.vectorScale", "vectorScale"))
+    {
+        uiTuning_.modern.vectorScale = value;
+        return true;
+    }
+    if (keyMatches(key, "modern.labelGap", "labelGap"))
+    {
+        uiTuning_.modern.labelGap = static_cast<int8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.globalBrightness"))
+    {
+        uiTuning_.cyberpunk.globalBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.ringBrightness"))
+    {
+        uiTuning_.cyberpunk.ringBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.textBrightness"))
+    {
+        uiTuning_.cyberpunk.textBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.aircraftBrightness"))
+    {
+        uiTuning_.cyberpunk.aircraftBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.sweepBrightness"))
+    {
+        uiTuning_.cyberpunk.sweepBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.outerRadius"))
+    {
+        uiTuning_.cyberpunk.outerRadius = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.innerRadarRadius"))
+    {
+        uiTuning_.cyberpunk.innerRadarRadius = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.ringCount"))
+    {
+        uiTuning_.cyberpunk.ringCount = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.lineWidth"))
+    {
+        uiTuning_.cyberpunk.lineWidth = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.majorTickLength"))
+    {
+        uiTuning_.cyberpunk.majorTickLength = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.minorTickLength"))
+    {
+        uiTuning_.cyberpunk.minorTickLength = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.centerDotRadius"))
+    {
+        uiTuning_.cyberpunk.centerDotRadius = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.aircraftScale"))
+    {
+        uiTuning_.cyberpunk.aircraftScale = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.vectorScale"))
+    {
+        uiTuning_.cyberpunk.vectorScale = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.sweepWidth"))
+    {
+        uiTuning_.cyberpunk.sweepWidth = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.sweepTrailStrength"))
+    {
+        uiTuning_.cyberpunk.sweepTrailStrength = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.labelGap"))
+    {
+        uiTuning_.cyberpunk.labelGap = static_cast<int8_t>(value);
+        return true;
+    }
+
+    return false;
 }
 
 void RadarApp::switchUiTheme()

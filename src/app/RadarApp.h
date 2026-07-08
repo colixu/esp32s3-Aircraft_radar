@@ -11,12 +11,19 @@
 #include "../data/RealRadarTrackManager.h"
 #include "../ui/ApiTestView.h"
 #include "../ui/RadarRenderer.h"
+#include "../ui/RadarUiTuning.h"
 #include "ConfigPortal.h"
 #include "InputManager.h"
 #include "SettingsStore.h"
 #include "TimeManager.h"
 #include "UserSettings.h"
 #include "WifiManagerSimple.h"
+
+enum class DebugMode
+{
+    None,
+    UiLab
+};
 
 class RadarApp
 {
@@ -42,9 +49,16 @@ private:
     RealRadarTrackManager realTrackManager_;
     ApiTestView apiTestView_;
     Aircraft realAircraft_[AircraftModel::kAircraftCount];
+    Aircraft uiLabAircraft_[AircraftModel::kAircraftCount];
     uint8_t realAircraftCount_ = 0;
+    uint8_t uiLabAircraftCount_ = 0;
     char realRadarStatus_[32] = "LIVE WAIT";
     DeviceState deviceState_ = DeviceState::Boot;
+    DeviceState uiLabPreviousDeviceState_ = DeviceState::Boot;
+    DebugMode debugMode_ = DebugMode::None;
+    UiTheme uiLabTheme_ = UiTheme::ModernRadar;
+    uint8_t uiLabSceneIndex_ = 0;
+    RadarUiTuning uiTuning_;
     SetupDisplayMode setupDisplayMode_ = SetupDisplayMode::QrCode;
     SettingsDisplayMode settingsDisplayMode_ = SettingsDisplayMode::ApQr;
     bool staSettingsOverlayVisible_ = false;
@@ -70,7 +84,20 @@ private:
     void beginRealRadar();
     void updateInput();
     void handleInputEvent(InputEvent event);
+    void handleUiTuningCommand(const UiTuningCommand &command);
     void printSerialHelp();
+    void toggleUiLab();
+    void enterUiLab();
+    void exitUiLab();
+    void updateUiLab(uint32_t now);
+    void renderUiLabFrame();
+    void loadUiLabScene(uint8_t sceneIndex);
+    void nextUiLabTheme();
+    void nextUiLabScene();
+    void resetUiTuning();
+    void saveUiTuning();
+    bool applyUiTuningColor(const char *key, const UiTuningCommand &command);
+    bool applyUiTuningValue(const char *key, const UiTuningCommand &command);
     void switchUiTheme();
     void switchRange();
     void toggleGroundTraffic();

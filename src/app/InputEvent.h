@@ -12,6 +12,12 @@ enum class InputEvent
     ToggleSettingsDisplay,
     ExitCurrentView,
 
+    ToggleUiLab,
+    NextUiLabScene,
+    PrintUiTuning,
+    SaveUiTuning,
+    ResetUiTuning,
+
     NextUiTheme,
     SwitchRange,
     ToggleGroundTraffic,

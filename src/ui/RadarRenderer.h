@@ -5,6 +5,7 @@
 #include "../aircraft/AircraftModel.h"
 #include "../app/AppConfig.h"
 #include "../app/UserSettings.h"
+#include "RadarUiTuning.h"
 
 enum class SetupDisplayMode
 {
@@ -27,6 +28,7 @@ public:
 
     void begin();
     bool isReady() const;
+    void setUiTuning(const RadarUiTuning *tuning);
     void renderRadarFrame(const Aircraft *aircraft,
                           uint8_t aircraftCount,
                           uint8_t selectedAircraftIndex,
@@ -64,6 +66,8 @@ private:
     TFT_eSPI &tft_;
     TFT_eSprite frame_;
     bool frameBufferReady_ = false;
+    RadarUiTuning defaultUiTuning_;
+    const RadarUiTuning *uiTuning_ = nullptr;
 
     uint16_t radarGreen_;
     uint16_t dimGreen_;
@@ -87,6 +91,31 @@ private:
     void initDisplay();
     void initFrameBuffer();
     void initColors();
+    const ModernRadarTuning &modernTuning() const;
+    const CyberpunkRadarTuning &cyberpunkTuning() const;
+    uint16_t color565Scaled(const RgbColor &color, float globalBrightness, float localBrightness);
+    uint16_t modernBackgroundColor();
+    uint16_t modernGridColor();
+    uint16_t modernTextColor();
+    uint16_t modernAircraftColor();
+    uint16_t modernVectorColor();
+    uint16_t modernAltitudeColor();
+    uint16_t modernCenterColor();
+    uint16_t cyberpunkColor(const RgbColor &color, float localBrightness);
+    uint16_t cyberBackgroundColor();
+    uint16_t cyberNoiseColor();
+    uint16_t cyberOuterRingColor();
+    uint16_t cyberRingColor();
+    uint16_t cyberRingDimColor();
+    uint16_t cyberCrosshairColor();
+    uint16_t cyberTickColor();
+    uint16_t cyberMagentaColor();
+    uint16_t cyberAircraftColor();
+    uint16_t cyberAircraftGlowColor();
+    uint16_t cyberTextColor();
+    uint16_t cyberAltitudeColor();
+    uint16_t cyberSelectedColor();
+    uint16_t cyberSweepColor();
 
     void radarToScreen(float bearingDeg,
                        float distanceKm,
@@ -166,5 +195,49 @@ private:
                                              int16_t y0,
                                              int16_t &x1,
                                              int16_t &y1) const;
-    void renderCyberpunkPlaceholder(uint8_t aircraftCount, const char *statusText);
+    void renderCyberpunkRadarFrame(const Aircraft *aircraft,
+                                   uint8_t aircraftCount,
+                                   uint8_t selectedAircraftIndex,
+                                   const AppConfig &config,
+                                   const char *statusText);
+    void drawCyberpunkBackground(TFT_eSprite &canvas);
+    void drawCyberpunkRings(TFT_eSprite &canvas);
+    void drawCyberpunkOuterTicks(TFT_eSprite &canvas);
+    void drawCyberpunkCardinals(TFT_eSprite &canvas);
+    void drawCyberpunkCrosshair(TFT_eSprite &canvas);
+    void drawCyberpunkSweep(TFT_eSprite &canvas);
+    void drawCyberpunkCenter(TFT_eSprite &canvas);
+    void drawCyberpunkAircraftTargets(TFT_eSprite &canvas,
+                                      const Aircraft *aircraft,
+                                      uint8_t aircraftCount,
+                                      uint8_t selectedAircraftIndex,
+                                      const AppConfig &config);
+    void drawCyberpunkAircraftSymbol(TFT_eSprite &canvas,
+                                     const Aircraft &target,
+                                     int16_t x,
+                                     int16_t y,
+                                     bool selected);
+    void drawCyberpunkSpeedVector(TFT_eSprite &canvas,
+                                  const Aircraft &target,
+                                  int16_t x,
+                                  int16_t y);
+    void drawCyberpunkAircraftLabel(TFT_eSprite &canvas,
+                                    const Aircraft &target,
+                                    int16_t x,
+                                    int16_t y,
+                                    bool selected);
+    void drawCyberpunkStatusText(TFT_eSprite &canvas,
+                                 const char *statusText,
+                                 uint8_t aircraftCount,
+                                 const AppConfig &config);
+    bool cyberpunkToScreen(const Aircraft &target,
+                           const AppConfig &config,
+                           int16_t &x,
+                           int16_t &y,
+                           bool &insideRadar) const;
+    int cyberpunkSpeedVectorLengthPx(float speedMs) const;
+    void clipCyberpunkPointToInnerRadar(int16_t x0,
+                                        int16_t y0,
+                                        int16_t &x1,
+                                        int16_t &y1) const;
 };
