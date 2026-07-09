@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "DebugLog.h"
+#include "FeatureFlags.h"
 
 namespace
 {
@@ -162,27 +163,49 @@ void InputManager::handleSerialCommand(char command)
 
         case 'y':
         case 'Y':
+#if ENABLE_UI_LAB
             pushEvent(InputEvent::ToggleUiLab);
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case 'f':
         case 'F':
+#if ENABLE_UI_LAB
             pushEvent(InputEvent::NextUiLabScene);
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case 'j':
         case 'J':
+#if ENABLE_UI_LAB
             pushEvent(InputEvent::PrintUiTuning);
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case 'k':
         case 'K':
+#if ENABLE_UI_LAB && ENABLE_UI_LAB_ADVANCED_TUNING
             pushEvent(InputEvent::SaveUiTuning);
+#elif ENABLE_UI_LAB
+            DebugLog::println("Advanced UI tuning is disabled in this build.");
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case 'n':
         case 'N':
+#if ENABLE_UI_LAB
             pushEvent(InputEvent::ResetUiTuning);
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case 'x':
@@ -278,6 +301,13 @@ bool InputManager::parseUiTuningCommand(char *line)
         return false;
     }
 
+#if !ENABLE_UI_LAB
+    DebugLog::println("set ignored: UI Lab is disabled in this build.");
+    return true;
+#elif !ENABLE_UI_LAB_ADVANCED_TUNING
+    DebugLog::println("set ignored: advanced UI tuning is disabled in this build.");
+    return true;
+#else
     token = strtok(nullptr, " \t");
     if (token == nullptr)
     {
@@ -302,6 +332,7 @@ bool InputManager::parseUiTuningCommand(char *line)
     pendingUiCommand_.pending = true;
     uiCommandPending_ = true;
     return true;
+#endif
 }
 
 void InputManager::updateButtons()

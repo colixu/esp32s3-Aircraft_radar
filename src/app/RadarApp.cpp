@@ -4,20 +4,13 @@
 #include <string.h>
 
 #include "DebugLog.h"
+#include "FeatureFlags.h"
 #include "../utils/GeoUtils.h"
 
 namespace
 {
     constexpr uint32_t kScheduleCheckIntervalMs = 5000;
     constexpr uint32_t kSystemStatusLogIntervalMs = 60000;
-
-#ifndef ENABLE_UI_LAB
-#define ENABLE_UI_LAB 1
-#endif
-
-#ifndef ENABLE_UI_LAB_ADVANCED_TUNING
-#define ENABLE_UI_LAB_ADVANCED_TUNING 0
-#endif
 
     bool keyMatches(const char *key, const char *a, const char *b = nullptr, const char *c = nullptr)
     {
@@ -1308,9 +1301,18 @@ SystemStatus RadarApp::getSystemStatus() const
     status.lastHttpCode = realApiUpdater_.lastHttpStatus();
     status.apiRequestCount = apiRequestCount_;
     status.apiErrorCount = apiErrorCount_;
-    status.aircraftCount = config_.appMode == AppMode::RealRadar ?
-                           realAircraftCount_ :
-                           dataProvider_.count();
+    if (debugMode_ == DebugMode::UiLab)
+    {
+        status.aircraftCount = uiLabAircraftCount_;
+    }
+    else if (config_.appMode == AppMode::RealRadar)
+    {
+        status.aircraftCount = realAircraftCount_;
+    }
+    else
+    {
+        status.aircraftCount = dataProvider_.count();
+    }
     status.lastFrameMs = lastFrameMs_;
     status.fpsX10 = config_.frameIntervalMs > 0 ?
                     static_cast<uint16_t>(10000UL / config_.frameIntervalMs) :
