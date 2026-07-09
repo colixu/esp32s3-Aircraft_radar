@@ -54,6 +54,19 @@ public:
                           const char *dateText,
                           const char *nextRunText,
                           const char *hintText);
+    void renderLocalMenuFrame(const char *title,
+                              const char *const *items,
+                              uint8_t itemCount,
+                              uint8_t selectedIndex,
+                              const char *hint);
+    void renderLocalAdjustFrame(const char *title,
+                                const char *valueText,
+                                const char *hint1,
+                                const char *hint2);
+    void renderLocalConfirmFrame(const char *title,
+                                 const char *message,
+                                 const char *confirmHint,
+                                 const char *cancelHint);
     void renderBlankFrame();
 
 private:

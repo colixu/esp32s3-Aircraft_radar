@@ -11,6 +11,33 @@ namespace
 {
     constexpr uint32_t kScheduleCheckIntervalMs = 5000;
     constexpr uint32_t kSystemStatusLogIntervalMs = 60000;
+    constexpr uint32_t kLocalMenuTimeoutMs = 30000;
+    constexpr uint8_t kLocalMenuItemCount = 7;
+    constexpr uint8_t kBrightnessLevelCount = 4;
+
+    const char *const kLocalMenuItems[kLocalMenuItemCount] = {
+        "Settings QR",
+        "Reboot",
+        "Screen Sleep",
+        "Brightness",
+        "Idle Display",
+        "AP Setup",
+        "Exit"
+    };
+
+    const char *const kBrightnessLabels[kBrightnessLevelCount] = {
+        "25%",
+        "50%",
+        "75%",
+        "100%"
+    };
+
+    const uint8_t kBrightnessValues[kBrightnessLevelCount] = {
+        64,
+        128,
+        192,
+        255
+    };
 
     bool keyMatches(const char *key, const char *a, const char *b = nullptr, const char *c = nullptr)
     {
@@ -50,6 +77,20 @@ namespace
                event == InputEvent::KeyDownShort ||
                event == InputEvent::KeyDownLong ||
                event == InputEvent::KeyDownDouble;
+    }
+
+    ScheduleIdleDisplayMode previousIdleDisplayMode(ScheduleIdleDisplayMode mode)
+    {
+        switch (mode)
+        {
+            case ScheduleIdleDisplayMode::PausedStatus:
+                return ScheduleIdleDisplayMode::DisplayOff;
+            case ScheduleIdleDisplayMode::Clock:
+                return ScheduleIdleDisplayMode::PausedStatus;
+            case ScheduleIdleDisplayMode::DisplayOff:
+            default:
+                return ScheduleIdleDisplayMode::Clock;
+        }
     }
 }
 
@@ -118,6 +159,17 @@ void RadarApp::update()
     if (debugMode_ == DebugMode::UiLab)
     {
         updateUiLab(now);
+        return;
+    }
+
+    if (screenSleeping_)
+    {
+        return;
+    }
+
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        updateLocalMenu(now);
         return;
     }
 
@@ -419,6 +471,12 @@ void RadarApp::handleButtonInputEvent(InputEvent event)
         return;
     }
 
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        handleLocalMenuButtonEvent(event);
+        return;
+    }
+
     switch (event)
     {
         case InputEvent::KeyUpShort:
@@ -449,48 +507,15 @@ void RadarApp::handleButtonInputEvent(InputEvent event)
 
         case InputEvent::KeyUpLong:
         case InputEvent::KeyDownLong:
-            if (deviceState_ == DeviceState::SetupPortal)
-            {
-                toggleSetupDisplayMode();
-            }
-            else if (staSettingsOverlayVisible_)
-            {
-                hideStaSettingsOverlay();
-            }
-            else if (wifi_.isConnected())
-            {
-                showStaSettingsOverlay();
-            }
-            else
-            {
-                enterSetupPortal("Button long press");
-            }
+            openLocalMenu();
             break;
 
         case InputEvent::KeyUpDouble:
-            if (deviceState_ == DeviceState::SetupPortal || staSettingsOverlayVisible_)
-            {
-                toggleSetupDisplayMode();
-            }
-            else
-            {
-                DebugLog::println("KEY_UP double press: no action in current view.");
-            }
+            DebugLog::println("KEY_UP double press: no action in current view.");
             break;
 
         case InputEvent::KeyDownDouble:
-            if (deviceState_ == DeviceState::SetupPortal)
-            {
-                exitSetupPortal();
-            }
-            else if (staSettingsOverlayVisible_)
-            {
-                hideStaSettingsOverlay();
-            }
-            else
-            {
-                DebugLog::println("KEY_DOWN double press: no action in current view.");
-            }
+            DebugLog::println("KEY_DOWN double press: no action in current view.");
             break;
 
         case InputEvent::None:
@@ -528,6 +553,380 @@ void RadarApp::wakeScreenFromSleep()
     else
     {
         renderApiTestScreen();
+    }
+}
+
+void RadarApp::openLocalMenu()
+{
+    if (staSettingsOverlayVisible_)
+    {
+        hideStaSettingsOverlay();
+    }
+
+    localMenuPage_ = LocalMenuPage::MainMenu;
+    localMenuIndex_ = 0;
+    localMenuBrightnessIndex_ = brightnessIndexFromValue(settings_.display.brightness);
+    localMenuIdleDisplayMode_ = settings_.schedule.idleDisplayMode;
+    localMenuLastInputMs_ = millis();
+    DebugLog::println("Local menu opened.");
+    renderLocalMenu();
+}
+
+void RadarApp::closeLocalMenu(bool restoreDisplay)
+{
+    if (localMenuPage_ == LocalMenuPage::Closed)
+    {
+        return;
+    }
+
+    localMenuPage_ = LocalMenuPage::Closed;
+    localMenuLastInputMs_ = 0;
+    DebugLog::println("Local menu closed.");
+
+    if (restoreDisplay)
+    {
+        renderCurrentDisplay();
+    }
+}
+
+void RadarApp::updateLocalMenu(uint32_t now)
+{
+    if (localMenuLastInputMs_ != 0 && now - localMenuLastInputMs_ >= kLocalMenuTimeoutMs)
+    {
+        DebugLog::println("Local menu timeout.");
+        closeLocalMenu(true);
+    }
+}
+
+void RadarApp::handleLocalMenuButtonEvent(InputEvent event)
+{
+    localMenuLastInputMs_ = millis();
+
+    if (event == InputEvent::KeyUpLong || event == InputEvent::KeyDownLong)
+    {
+        if (localMenuPage_ == LocalMenuPage::ConfirmReboot ||
+            localMenuPage_ == LocalMenuPage::ConfirmApSetup ||
+            localMenuPage_ == LocalMenuPage::BrightnessAdjust ||
+            localMenuPage_ == LocalMenuPage::IdleDisplayAdjust)
+        {
+            localMenuPage_ = LocalMenuPage::MainMenu;
+            renderLocalMenu();
+            return;
+        }
+
+        closeLocalMenu(true);
+        return;
+    }
+
+    switch (localMenuPage_)
+    {
+        case LocalMenuPage::MainMenu:
+            if (event == InputEvent::KeyUpShort)
+            {
+                localMenuIndex_ = localMenuIndex_ == 0 ? kLocalMenuItemCount - 1 : localMenuIndex_ - 1;
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyDownShort)
+            {
+                localMenuIndex_ = (localMenuIndex_ + 1) % kLocalMenuItemCount;
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyUpDouble)
+            {
+                executeLocalMenuItem();
+            }
+            else if (event == InputEvent::KeyDownDouble)
+            {
+                closeLocalMenu(true);
+            }
+            break;
+
+        case LocalMenuPage::BrightnessAdjust:
+            if (event == InputEvent::KeyUpShort)
+            {
+                if (localMenuBrightnessIndex_ < kBrightnessLevelCount - 1)
+                {
+                    ++localMenuBrightnessIndex_;
+                }
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyDownShort)
+            {
+                if (localMenuBrightnessIndex_ > 0)
+                {
+                    --localMenuBrightnessIndex_;
+                }
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyUpDouble)
+            {
+                settings_.display.brightness = brightnessValueFromIndex(localMenuBrightnessIndex_);
+                sanitizeUserSettings(settings_);
+                settingsStore_.save(settings_);
+                DebugLog::printf("Brightness saved: %u\r\n", settings_.display.brightness);
+                localMenuPage_ = LocalMenuPage::MainMenu;
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyDownDouble)
+            {
+                localMenuBrightnessIndex_ = brightnessIndexFromValue(settings_.display.brightness);
+                localMenuPage_ = LocalMenuPage::MainMenu;
+                renderLocalMenu();
+            }
+            break;
+
+        case LocalMenuPage::IdleDisplayAdjust:
+            if (event == InputEvent::KeyUpShort)
+            {
+                localMenuIdleDisplayMode_ = previousIdleDisplayMode(localMenuIdleDisplayMode_);
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyDownShort)
+            {
+                localMenuIdleDisplayMode_ = nextScheduleIdleDisplayMode(localMenuIdleDisplayMode_);
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyUpDouble)
+            {
+                settings_.schedule.idleDisplayMode = localMenuIdleDisplayMode_;
+                sanitizeUserSettings(settings_);
+                settingsStore_.save(settings_);
+                DebugLog::printf("Idle display saved: %s\r\n",
+                                 scheduleIdleDisplayModeName(settings_.schedule.idleDisplayMode));
+                localMenuPage_ = LocalMenuPage::MainMenu;
+                renderLocalMenu();
+            }
+            else if (event == InputEvent::KeyDownDouble)
+            {
+                localMenuIdleDisplayMode_ = settings_.schedule.idleDisplayMode;
+                localMenuPage_ = LocalMenuPage::MainMenu;
+                renderLocalMenu();
+            }
+            break;
+
+        case LocalMenuPage::ConfirmReboot:
+            if (event == InputEvent::KeyUpDouble)
+            {
+                DebugLog::println("Reboot confirmed from local menu.");
+                delay(100);
+                ESP.restart();
+            }
+            else if (event == InputEvent::KeyDownDouble)
+            {
+                localMenuPage_ = LocalMenuPage::MainMenu;
+                renderLocalMenu();
+            }
+            break;
+
+        case LocalMenuPage::ConfirmApSetup:
+            if (event == InputEvent::KeyUpDouble)
+            {
+                closeLocalMenu(false);
+                enterSetupPortal("Local menu");
+            }
+            else if (event == InputEvent::KeyDownDouble)
+            {
+                localMenuPage_ = LocalMenuPage::MainMenu;
+                renderLocalMenu();
+            }
+            break;
+
+        case LocalMenuPage::Closed:
+        default:
+            break;
+    }
+}
+
+void RadarApp::executeLocalMenuItem()
+{
+    switch (static_cast<LocalMenuItem>(localMenuIndex_))
+    {
+        case LocalMenuItem::SettingsQr:
+            closeLocalMenu(false);
+            if (wifi_.isConnected())
+            {
+                showStaSettingsOverlay();
+            }
+            else
+            {
+                screenSleeping_ = false;
+                renderer_.renderSystemStatusFrame("NO WIFI", "WiFi not connected", "Use AP Setup");
+            }
+            break;
+
+        case LocalMenuItem::Reboot:
+            localMenuPage_ = LocalMenuPage::ConfirmReboot;
+            renderLocalMenu();
+            break;
+
+        case LocalMenuItem::ScreenSleep:
+            closeLocalMenu(false);
+            screenSleeping_ = true;
+            renderer_.renderBlankFrame();
+            DebugLog::println("Screen sleep entered from local menu.");
+            break;
+
+        case LocalMenuItem::Brightness:
+            localMenuBrightnessIndex_ = brightnessIndexFromValue(settings_.display.brightness);
+            localMenuPage_ = LocalMenuPage::BrightnessAdjust;
+            renderLocalMenu();
+            break;
+
+        case LocalMenuItem::IdleDisplay:
+            localMenuIdleDisplayMode_ = settings_.schedule.idleDisplayMode;
+            localMenuPage_ = LocalMenuPage::IdleDisplayAdjust;
+            renderLocalMenu();
+            break;
+
+        case LocalMenuItem::ApSetup:
+            localMenuPage_ = LocalMenuPage::ConfirmApSetup;
+            renderLocalMenu();
+            break;
+
+        case LocalMenuItem::Exit:
+        default:
+            closeLocalMenu(true);
+            break;
+    }
+}
+
+void RadarApp::renderLocalMenu()
+{
+    if (!renderer_.isReady())
+    {
+        return;
+    }
+
+    screenSleeping_ = false;
+    renderLocalMenuPage();
+}
+
+void RadarApp::renderLocalMenuPage()
+{
+    switch (localMenuPage_)
+    {
+        case LocalMenuPage::MainMenu:
+            renderer_.renderLocalMenuFrame("LOCAL MENU",
+                                           kLocalMenuItems,
+                                           kLocalMenuItemCount,
+                                           localMenuIndex_,
+                                           "UP/DN Move");
+            break;
+
+        case LocalMenuPage::BrightnessAdjust:
+        {
+            char valueText[16];
+            snprintf(valueText, sizeof(valueText), "%s", kBrightnessLabels[localMenuBrightnessIndex_]);
+            renderer_.renderLocalAdjustFrame("BRIGHTNESS",
+                                             valueText,
+                                             "UP/DN Change",
+                                             "UP2 OK DN2 Back");
+            break;
+        }
+
+        case LocalMenuPage::IdleDisplayAdjust:
+            renderer_.renderLocalAdjustFrame("IDLE DISPLAY",
+                                             idleDisplayMenuName(localMenuIdleDisplayMode_),
+                                             "UP/DN Change",
+                                             "UP2 OK DN2 Back");
+            break;
+
+        case LocalMenuPage::ConfirmReboot:
+            renderer_.renderLocalConfirmFrame("REBOOT",
+                                              "Restart device?",
+                                              "UP2 Reboot",
+                                              "DN2 Back");
+            break;
+
+        case LocalMenuPage::ConfirmApSetup:
+            renderer_.renderLocalConfirmFrame("AP SETUP",
+                                              "Start setup AP?",
+                                              "UP2 Start",
+                                              "DN2 Back");
+            break;
+
+        case LocalMenuPage::Closed:
+        default:
+            break;
+    }
+}
+
+void RadarApp::renderCurrentDisplay()
+{
+    if (!renderer_.isReady())
+    {
+        return;
+    }
+
+    if (staSettingsOverlayVisible_)
+    {
+        renderSettingsDisplay(nullptr);
+        return;
+    }
+
+    if (deviceState_ == DeviceState::SetupPortal)
+    {
+        renderSetupPortalFrame(nullptr);
+        return;
+    }
+
+    if (deviceState_ == DeviceState::PausedBySchedule)
+    {
+        renderPausedIdleFrame(true);
+        return;
+    }
+
+    if (config_.appMode == AppMode::ApiTest)
+    {
+        renderApiTestScreen();
+    }
+    else if (config_.appMode == AppMode::RealRadar)
+    {
+        renderRealRadarFrame();
+    }
+    else
+    {
+        renderFrame();
+    }
+}
+
+uint8_t RadarApp::brightnessIndexFromValue(uint8_t brightness) const
+{
+    uint8_t bestIndex = 0;
+    uint8_t bestDelta = 255;
+    for (uint8_t i = 0; i < kBrightnessLevelCount; ++i)
+    {
+        const uint8_t level = kBrightnessValues[i];
+        const uint8_t delta = brightness > level ? brightness - level : level - brightness;
+        if (delta < bestDelta)
+        {
+            bestDelta = delta;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
+}
+
+uint8_t RadarApp::brightnessValueFromIndex(uint8_t index) const
+{
+    if (index >= kBrightnessLevelCount)
+    {
+        index = kBrightnessLevelCount - 1;
+    }
+    return kBrightnessValues[index];
+}
+
+const char *RadarApp::idleDisplayMenuName(ScheduleIdleDisplayMode mode) const
+{
+    switch (mode)
+    {
+        case ScheduleIdleDisplayMode::PausedStatus:
+            return "Paused";
+        case ScheduleIdleDisplayMode::Clock:
+            return "Clock";
+        case ScheduleIdleDisplayMode::DisplayOff:
+        default:
+            return "Sleep / Black";
     }
 }
 

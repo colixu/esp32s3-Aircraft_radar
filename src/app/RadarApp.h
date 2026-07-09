@@ -26,6 +26,27 @@ enum class DebugMode
     UiLab
 };
 
+enum class LocalMenuPage
+{
+    Closed,
+    MainMenu,
+    BrightnessAdjust,
+    IdleDisplayAdjust,
+    ConfirmReboot,
+    ConfirmApSetup
+};
+
+enum class LocalMenuItem
+{
+    SettingsQr,
+    Reboot,
+    ScreenSleep,
+    Brightness,
+    IdleDisplay,
+    ApSetup,
+    Exit
+};
+
 class RadarApp
 {
 public:
@@ -65,6 +86,11 @@ private:
     bool staSettingsOverlayVisible_ = false;
     bool wifiManagerStarted_ = false;
     bool screenSleeping_ = false;
+    LocalMenuPage localMenuPage_ = LocalMenuPage::Closed;
+    uint8_t localMenuIndex_ = 0;
+    uint8_t localMenuBrightnessIndex_ = 0;
+    ScheduleIdleDisplayMode localMenuIdleDisplayMode_ = ScheduleIdleDisplayMode::PausedStatus;
+    uint32_t localMenuLastInputMs_ = 0;
 
     uint8_t selectedAircraftIndex_ = 0;
     uint32_t lastFrameMs_ = 0;
@@ -92,6 +118,17 @@ private:
     void handleInputEvent(InputEvent event);
     void handleButtonInputEvent(InputEvent event);
     void wakeScreenFromSleep();
+    void openLocalMenu();
+    void closeLocalMenu(bool restoreDisplay = true);
+    void updateLocalMenu(uint32_t now);
+    void handleLocalMenuButtonEvent(InputEvent event);
+    void executeLocalMenuItem();
+    void renderLocalMenu();
+    void renderLocalMenuPage();
+    void renderCurrentDisplay();
+    uint8_t brightnessIndexFromValue(uint8_t brightness) const;
+    uint8_t brightnessValueFromIndex(uint8_t index) const;
+    const char *idleDisplayMenuName(ScheduleIdleDisplayMode mode) const;
     void handleUiTuningCommand(const UiTuningCommand &command);
     void printSerialHelp();
     void toggleUiLab();

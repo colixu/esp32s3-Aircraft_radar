@@ -1911,6 +1911,118 @@ void RadarRenderer::renderClockFrame(const char *timeText,
     frame_.pushSprite(0, 0);
 }
 
+void RadarRenderer::renderLocalMenuFrame(const char *title,
+                                         const char *const *items,
+                                         uint8_t itemCount,
+                                         uint8_t selectedIndex,
+                                         const char *hint)
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    frame_.fillSprite(TFT_BLACK);
+    frame_.drawCircle(kCenterX, kCenterY, 116, radarGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
+
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(sweepGreen_, TFT_BLACK);
+    frame_.drawString(title != nullptr ? title : "MENU", kCenterX, 32, 2);
+
+    const uint8_t visibleCount = itemCount < 5 ? itemCount : 5;
+    uint8_t first = 0;
+    if (itemCount > visibleCount)
+    {
+        if (selectedIndex >= 2)
+        {
+            first = selectedIndex - 2;
+        }
+        if (first + visibleCount > itemCount)
+        {
+            first = itemCount - visibleCount;
+        }
+    }
+
+    for (uint8_t row = 0; row < visibleCount; ++row)
+    {
+        const uint8_t itemIndex = first + row;
+        const int16_t y = 70 + row * 24;
+        const bool selected = itemIndex == selectedIndex;
+        const uint16_t textColor = selected ? selectedGreen_ : labelGreen_;
+
+        if (selected)
+        {
+            frame_.fillRoundRect(44, y - 10, 152, 20, 5, dimGreen_);
+            frame_.drawRoundRect(44, y - 10, 152, 20, 5, sweepGreen_);
+        }
+
+        frame_.setTextColor(textColor, selected ? dimGreen_ : TFT_BLACK);
+        frame_.drawString(items != nullptr && itemIndex < itemCount ? items[itemIndex] : "", kCenterX, y, 1);
+    }
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString(hint != nullptr ? hint : "UP/DN Move", kCenterX, 198, 1);
+    frame_.drawString("UP2 OK DN2 Back", kCenterX, 214, 1);
+    frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::renderLocalAdjustFrame(const char *title,
+                                           const char *valueText,
+                                           const char *hint1,
+                                           const char *hint2)
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    frame_.fillSprite(TFT_BLACK);
+    frame_.drawCircle(kCenterX, kCenterY, 116, radarGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 40, dimGreen_);
+
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(sweepGreen_, TFT_BLACK);
+    frame_.drawString(title != nullptr ? title : "ADJUST", kCenterX, 54, 2);
+
+    frame_.setTextColor(selectedGreen_, TFT_BLACK);
+    frame_.drawString(valueText != nullptr ? valueText : "--", kCenterX, 112, 4);
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString(hint1 != nullptr ? hint1 : "UP/DN Change", kCenterX, 178, 1);
+    frame_.drawString(hint2 != nullptr ? hint2 : "UP2 OK DN2 Back", kCenterX, 196, 1);
+    frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::renderLocalConfirmFrame(const char *title,
+                                            const char *message,
+                                            const char *confirmHint,
+                                            const char *cancelHint)
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    frame_.fillSprite(TFT_BLACK);
+    frame_.drawCircle(kCenterX, kCenterY, 116, radarGreen_);
+    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
+
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(sweepGreen_, TFT_BLACK);
+    frame_.drawString(title != nullptr ? title : "CONFIRM", kCenterX, 62, 2);
+
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString(message != nullptr ? message : "", kCenterX, 112, 1);
+
+    frame_.setTextColor(selectedGreen_, TFT_BLACK);
+    frame_.drawString(confirmHint != nullptr ? confirmHint : "UP2 Confirm", kCenterX, 164, 1);
+    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.drawString(cancelHint != nullptr ? cancelHint : "DN2 Back", kCenterX, 184, 1);
+    frame_.pushSprite(0, 0);
+}
+
 void RadarRenderer::renderBlankFrame()
 {
     if (!frameBufferReady_)
