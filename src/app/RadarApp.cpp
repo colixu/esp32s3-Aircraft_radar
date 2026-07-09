@@ -657,10 +657,14 @@ void RadarApp::printUiLabStatus()
 
 void RadarApp::handleUiTuningCommand(const UiTuningCommand &command)
 {
-#if !ENABLE_UI_LAB_ADVANCED_TUNING
+#if !(ENABLE_UI_LAB && ENABLE_UI_LAB_ADVANCED_TUNING)
     (void)command;
+#if !ENABLE_UI_LAB
+    DebugLog::println("UI Lab is disabled in this build.");
+#else
     DebugLog::println("Advanced UI tuning is disabled in this build.");
     DebugLog::println("Set ENABLE_UI_LAB_ADVANCED_TUNING=1 to enable set commands.");
+#endif
     return;
 #else
     if (applyUiTuningColor(command.key, command) || applyUiTuningValue(command.key, command))
