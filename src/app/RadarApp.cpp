@@ -9,6 +9,15 @@
 namespace
 {
     constexpr uint32_t kScheduleCheckIntervalMs = 5000;
+    constexpr uint32_t kSystemStatusLogIntervalMs = 60000;
+
+#ifndef ENABLE_UI_LAB
+#define ENABLE_UI_LAB 1
+#endif
+
+#ifndef ENABLE_UI_LAB_ADVANCED_TUNING
+#define ENABLE_UI_LAB_ADVANCED_TUNING 0
+#endif
 
     bool keyMatches(const char *key, const char *a, const char *b = nullptr, const char *c = nullptr)
     {
@@ -58,7 +67,11 @@ void RadarApp::begin()
     loadDefaultRadarUiTuning(uiTuning_);
     renderer_.setUiTuning(&uiTuning_);
     settingsStore_.begin();
-    settingsStore_.load(settings_);
+    const bool settingsLoaded = settingsStore_.load(settings_);
+    if (!settingsLoaded)
+    {
+        DebugLog::println("Settings load fell back to sanitized defaults.");
+    }
     inputManager_.begin(settings_);
     printSerialHelp();
     beginConfiguredMode();
@@ -97,6 +110,7 @@ void RadarApp::update()
 {
     const uint32_t now = millis();
     updateInput();
+    updateLongRunStatusLog(now);
 
     if (debugMode_ == DebugMode::UiLab)
     {
@@ -245,23 +259,47 @@ void RadarApp::handleInputEvent(InputEvent event)
             break;
 
         case InputEvent::ToggleUiLab:
+#if ENABLE_UI_LAB
             toggleUiLab();
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case InputEvent::NextUiLabScene:
+#if ENABLE_UI_LAB
             nextUiLabScene();
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case InputEvent::PrintUiTuning:
+#if ENABLE_UI_LAB
+#if ENABLE_UI_LAB_ADVANCED_TUNING
             printRadarUiTuning(uiTuning_);
+#else
+            printUiLabStatus();
+#endif
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case InputEvent::SaveUiTuning:
+#if ENABLE_UI_LAB
             saveUiTuning();
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case InputEvent::ResetUiTuning:
+#if ENABLE_UI_LAB
             resetUiTuning();
+#else
+            DebugLog::println("UI Lab is disabled in this build.");
+#endif
             break;
 
         case InputEvent::ExitCurrentView:
@@ -366,12 +404,16 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  q: toggle setup QR/details");
     DebugLog::println("  w: show STA settings URL QR");
     DebugLog::println("  u: switch UI theme");
+#if ENABLE_UI_LAB
     DebugLog::println("UI Lab:");
     DebugLog::println("  y: toggle UI Lab");
     DebugLog::println("  f: next UI Lab fake scene");
-    DebugLog::println("  j: print UI tuning");
+    DebugLog::println("  u: next UI theme while in UI Lab");
+    DebugLog::println("  j: print UI Lab/display state");
+    DebugLog::println("  n: reset UI Lab runtime state");
+#if ENABLE_UI_LAB_ADVANCED_TUNING
+    DebugLog::println("UI Lab advanced tuning:");
     DebugLog::println("  k: save UI tuning (not persisted yet)");
-    DebugLog::println("  n: reset UI tuning");
     DebugLog::println("  set modern.bg R G B");
     DebugLog::println("  set modern.grid R G B");
     DebugLog::println("  set modern.globalBrightness VALUE");
@@ -397,6 +439,10 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  set modern|cyber.showStatusText 0/1");
     DebugLog::println("  set modern|cyber.showLeaderLines 0/1");
     DebugLog::println("  set modern|cyber.maxLabels VALUE");
+#else
+    DebugLog::println("  advanced set commands hidden (ENABLE_UI_LAB_ADVANCED_TUNING=0)");
+#endif
+#endif
     DebugLog::println("  r: switch radar range");
     DebugLog::println("  g: toggle ground traffic");
     DebugLog::println("  o: cycle outside-schedule display");
@@ -569,7 +615,11 @@ void RadarApp::resetUiTuning()
     loadDefaultRadarUiTuning(uiTuning_);
     renderer_.setUiTuning(&uiTuning_);
     DebugLog::println("UI tuning reset to defaults.");
+#if ENABLE_UI_LAB_ADVANCED_TUNING
     printRadarUiTuning(uiTuning_);
+#else
+    printUiLabStatus();
+#endif
     if (debugMode_ == DebugMode::UiLab)
     {
         renderUiLabFrame();
@@ -578,13 +628,48 @@ void RadarApp::resetUiTuning()
 
 void RadarApp::saveUiTuning()
 {
+#if ENABLE_UI_LAB_ADVANCED_TUNING
     DebugLog::println("UI tuning NVS save is not implemented in this first UI Lab version.");
     DebugLog::println("Use j to print values, then copy the chosen defaults into RadarUiTuning.cpp.");
     printRadarUiTuning(uiTuning_);
+#else
+    DebugLog::println("UI tuning save is hidden because advanced tuning is disabled.");
+#endif
+}
+
+void RadarApp::printUiLabStatus()
+{
+    const SystemStatus status = getSystemStatus();
+    DebugLog::println("UI Lab/display state:");
+    DebugLog::printf("  uiLab=%u theme=%s scene=%u\r\n",
+                     status.uiLabRunning ? 1 : 0,
+                     status.uiLabRunning ? uiThemeName(uiLabTheme_) : uiThemeName(settings_.display.uiTheme),
+                     uiLabSceneIndex_);
+    DebugLog::printf("  display theme=%s labels=%u maxAircraft=%u brightness=%u\r\n",
+                     uiThemeName(settings_.display.uiTheme),
+                     settings_.display.showLabels ? 1 : 0,
+                     settings_.display.maxAircraftToDisplay,
+                     settings_.display.brightness);
+    DebugLog::printf("  range=%.0fkm ground=%u aircraft=%u\r\n",
+                     settings_.location.maxRangeKm,
+                     settings_.filter.showGroundTraffic ? 1 : 0,
+                     status.aircraftCount);
+    DebugLog::printf("  state=%s wifi=%u updater=%u ntp=%u schedule=%u\r\n",
+                     deviceStateName(status.deviceState),
+                     status.wifiConnected ? 1 : 0,
+                     status.apiUpdaterRunning ? 1 : 0,
+                     status.ntpSynced ? 1 : 0,
+                     status.withinSchedule ? 1 : 0);
 }
 
 void RadarApp::handleUiTuningCommand(const UiTuningCommand &command)
 {
+#if !ENABLE_UI_LAB_ADVANCED_TUNING
+    (void)command;
+    DebugLog::println("Advanced UI tuning is disabled in this build.");
+    DebugLog::println("Set ENABLE_UI_LAB_ADVANCED_TUNING=1 to enable set commands.");
+    return;
+#else
     if (applyUiTuningColor(command.key, command) || applyUiTuningValue(command.key, command))
     {
         sanitizeRadarUiTuning(uiTuning_);
@@ -601,6 +686,7 @@ void RadarApp::handleUiTuningCommand(const UiTuningCommand &command)
     }
 
     DebugLog::printf("Unknown UI tuning key: %s\r\n", command.key);
+#endif
 }
 
 bool RadarApp::applyUiTuningColor(const char *key, const UiTuningCommand &command)
@@ -1170,16 +1256,92 @@ void RadarApp::printTimeStatus()
 
 void RadarApp::printDeviceStateStatus()
 {
+    const SystemStatus status = getSystemStatus();
     DebugLog::println("Device mode/status:");
-    DebugLog::printf("  appMode=%d state=%s wifi=%s staOverlay=%u\r\n",
-                     static_cast<int>(config_.appMode),
-                     deviceStateName(deviceState_),
+    DebugLog::printf("  appMode=%d state=%s theme=%s wifi=%s staOverlay=%u setup=%u uiLab=%u\r\n",
+                     static_cast<int>(status.appMode),
+                     deviceStateName(status.deviceState),
+                     uiThemeName(status.uiTheme),
                      wifi_.statusText(),
-                     staSettingsOverlayVisible_ ? 1 : 0);
-    DebugLog::printf("  updater running=%u updating=%u interval=%lums\r\n",
-                     realApiUpdater_.isRunning() ? 1 : 0,
-                     realApiUpdater_.isUpdating() ? 1 : 0,
-                     static_cast<unsigned long>(currentRealApiIntervalMs_));
+                     status.staSettingsServerRunning ? 1 : 0,
+                     status.setupPortalRunning ? 1 : 0,
+                     status.uiLabRunning ? 1 : 0);
+    DebugLog::printf("  updater running=%u updating=%u interval=%lums http=%d\r\n",
+                     status.apiUpdaterRunning ? 1 : 0,
+                     status.apiUpdaterUpdating ? 1 : 0,
+                     static_cast<unsigned long>(currentRealApiIntervalMs_),
+                     status.lastHttpCode);
+    DebugLog::printf("  uptime=%lus heap=%lu minHeap=%lu maxAlloc=%lu aircraft=%u api=%lu/%lu\r\n",
+                     static_cast<unsigned long>(status.uptimeMs / 1000UL),
+                     static_cast<unsigned long>(status.freeHeap),
+                     static_cast<unsigned long>(status.minFreeHeap),
+                     static_cast<unsigned long>(status.maxAllocHeap),
+                     status.aircraftCount,
+                     static_cast<unsigned long>(status.apiRequestCount),
+                     static_cast<unsigned long>(status.apiErrorCount));
+}
+
+SystemStatus RadarApp::getSystemStatus() const
+{
+    SystemStatus status;
+    status.deviceState = deviceState_;
+    status.appMode = config_.appMode;
+    status.uiTheme = debugMode_ == DebugMode::UiLab ? uiLabTheme_ : settings_.display.uiTheme;
+    status.wifiConnected = wifi_.isConnected();
+    status.staSettingsServerRunning = configPortal_.isRunning() &&
+                                      configPortal_.mode() == ConfigPortalMode::StaSettings;
+    status.setupPortalRunning = configPortal_.isRunning() &&
+                                configPortal_.mode() == ConfigPortalMode::ApSetup;
+    status.apiUpdaterRunning = realApiUpdater_.isRunning();
+    status.apiUpdaterUpdating = realApiUpdater_.isUpdating();
+    status.ntpSynced = timeManager_.isTimeSynced();
+    status.withinSchedule = !settings_.schedule.enabled ||
+                            (status.ntpSynced &&
+                             isWithinSchedule(settings_.schedule, timeManager_.getLocalMinutesOfDay()));
+    status.uiLabRunning = debugMode_ == DebugMode::UiLab;
+    status.uptimeMs = millis();
+    status.freeHeap = ESP.getFreeHeap();
+    status.minFreeHeap = ESP.getMinFreeHeap();
+    status.maxAllocHeap = ESP.getMaxAllocHeap();
+    status.lastApiSuccessMs = realApiUpdater_.lastSuccessMs();
+    status.lastApiErrorMs = lastApiErrorMs_;
+    status.lastHttpCode = realApiUpdater_.lastHttpStatus();
+    status.apiRequestCount = apiRequestCount_;
+    status.apiErrorCount = apiErrorCount_;
+    status.aircraftCount = config_.appMode == AppMode::RealRadar ?
+                           realAircraftCount_ :
+                           dataProvider_.count();
+    status.lastFrameMs = lastFrameMs_;
+    status.fpsX10 = config_.frameIntervalMs > 0 ?
+                    static_cast<uint16_t>(10000UL / config_.frameIntervalMs) :
+                    0;
+    return status;
+}
+
+void RadarApp::updateLongRunStatusLog(uint32_t now)
+{
+    if (!settings_.system.serialDebug)
+    {
+        return;
+    }
+
+    if (lastSystemStatusLogMs_ != 0 && now - lastSystemStatusLogMs_ < kSystemStatusLogIntervalMs)
+    {
+        return;
+    }
+    lastSystemStatusLogMs_ = now;
+
+    const SystemStatus status = getSystemStatus();
+    DebugLog::printf("Status: up=%lus heap=%lu min=%lu wifi=%u state=%s api=%lu/%lu aircraft=%u theme=%s\r\n",
+                     static_cast<unsigned long>(status.uptimeMs / 1000UL),
+                     static_cast<unsigned long>(status.freeHeap),
+                     static_cast<unsigned long>(status.minFreeHeap),
+                     status.wifiConnected ? 1 : 0,
+                     deviceStateName(status.deviceState),
+                     static_cast<unsigned long>(status.apiRequestCount),
+                     static_cast<unsigned long>(status.apiErrorCount),
+                     status.aircraftCount,
+                     uiThemeName(status.uiTheme));
 }
 
 void RadarApp::printApiAuthStatus()
@@ -1868,6 +2030,7 @@ void RadarApp::printApiTestSerialStatus()
 
 void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t now)
 {
+    ++apiRequestCount_;
     DebugLog::println("received new API snapshot");
     DebugLog::printf("  HTTP=%d duration=%lu ms payload=%lu aircraft=%u status=%s\r\n",
                      snapshot.httpStatusCode,
@@ -1886,6 +2049,8 @@ void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t
     }
     else
     {
+        ++apiErrorCount_;
+        lastApiErrorMs_ = now;
         DebugLog::println("  API snapshot failed, keeping current tracks.");
     }
 

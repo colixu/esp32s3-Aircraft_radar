@@ -15,6 +15,7 @@
 #include "ConfigPortal.h"
 #include "InputManager.h"
 #include "SettingsStore.h"
+#include "SystemStatus.h"
 #include "TimeManager.h"
 #include "UserSettings.h"
 #include "WifiManagerSimple.h"
@@ -75,8 +76,12 @@ private:
     uint32_t lastScheduleCheckMs_ = 0;
     uint32_t lastTimeSyncLogMs_ = 0;
     uint32_t lastIdleDisplayRenderMs_ = 0;
+    uint32_t lastSystemStatusLogMs_ = 0;
     uint32_t wifiLostSinceMs_ = 0;
     uint32_t currentRealApiIntervalMs_ = 0;
+    uint32_t apiRequestCount_ = 0;
+    uint32_t apiErrorCount_ = 0;
+    uint32_t lastApiErrorMs_ = 0;
 
     void beginConfiguredMode();
     void beginRadarDemo();
@@ -96,6 +101,7 @@ private:
     void nextUiLabScene();
     void resetUiTuning();
     void saveUiTuning();
+    void printUiLabStatus();
     bool applyUiTuningColor(const char *key, const UiTuningCommand &command);
     bool applyUiTuningValue(const char *key, const UiTuningCommand &command);
     void switchUiTheme();
@@ -111,6 +117,8 @@ private:
     void resetSettingsToDefault();
     void printTimeStatus();
     void printDeviceStateStatus();
+    SystemStatus getSystemStatus() const;
+    void updateLongRunStatusLog(uint32_t now);
     void printApiAuthStatus();
     void clearAuthToken();
     void enterSetupPortal(const char *reason);
