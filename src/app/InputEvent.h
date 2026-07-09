@@ -23,6 +23,13 @@ enum class InputEvent
     ToggleGroundTraffic,
     CycleScheduleIdleDisplayMode,
 
+    KeyUpShort,
+    KeyUpLong,
+    KeyUpDouble,
+    KeyDownShort,
+    KeyDownLong,
+    KeyDownDouble,
+
     SaveSettings,
     LoadSettings,
     ResetDefaults,

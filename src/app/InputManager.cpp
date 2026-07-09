@@ -12,6 +12,41 @@ namespace
     {
         return command == '\r' || command == '\n' || command == ' ' || command == '\t';
     }
+
+    bool equalsIgnoreCase(const char *a, const char *b)
+    {
+        if (a == nullptr || b == nullptr)
+        {
+            return false;
+        }
+
+        while (*a != '\0' && *b != '\0')
+        {
+            char ca = *a;
+            char cb = *b;
+            if (ca >= 'A' && ca <= 'Z')
+            {
+                ca = static_cast<char>(ca - 'A' + 'a');
+            }
+            if (cb >= 'A' && cb <= 'Z')
+            {
+                cb = static_cast<char>(cb - 'A' + 'a');
+            }
+            if (ca != cb)
+            {
+                return false;
+            }
+            ++a;
+            ++b;
+        }
+
+        return *a == '\0' && *b == '\0';
+    }
+
+    void printVirtualButtonHelp()
+    {
+        DebugLog::println("Unknown button command. Use: btn up short|long|double or btn down short|long|double");
+    }
 }
 
 void InputManager::begin(const UserSettings &settings)
@@ -117,6 +152,19 @@ void InputManager::handleSerialInput(char command)
     {
         const int next = Serial0.peek();
         if (next == 'e' || next == 'E')
+        {
+            lineBuffer_[0] = command;
+            lineLength_ = 1;
+            return;
+        }
+    }
+
+    if ((command == 'b' || command == 'B') && Serial0.available() > 0)
+    {
+        const int next = Serial0.peek();
+        if (next == 't' || next == 'T' ||
+            next == 'u' || next == 'U' ||
+            next == 'd' || next == 'D')
         {
             lineBuffer_[0] = command;
             lineLength_ = 1;
@@ -279,12 +327,109 @@ void InputManager::handleSerialCommand(char command)
 
 void InputManager::handleSerialLine()
 {
+    if (parseVirtualButtonCommand(lineBuffer_))
+    {
+        return;
+    }
+
     if (parseUiTuningCommand(lineBuffer_))
     {
         return;
     }
 
     DebugLog::printf("Unknown line command: %s\r\n", lineBuffer_);
+}
+
+bool InputManager::parseVirtualButtonCommand(char *line)
+{
+    if (line == nullptr)
+    {
+        return false;
+    }
+
+    char original[kLineBufferSize];
+    strncpy(original, line, sizeof(original) - 1);
+    original[sizeof(original) - 1] = '\0';
+
+    char *token = strtok(line, " \t");
+    if (token == nullptr)
+    {
+        return false;
+    }
+
+    bool up = false;
+    bool down = false;
+    char *action = nullptr;
+
+    if (equalsIgnoreCase(token, "btn"))
+    {
+        char *direction = strtok(nullptr, " \t");
+        action = strtok(nullptr, " \t");
+        if (equalsIgnoreCase(direction, "up"))
+        {
+            up = true;
+        }
+        else if (equalsIgnoreCase(direction, "down"))
+        {
+            down = true;
+        }
+        else
+        {
+            printVirtualButtonHelp();
+            return true;
+        }
+    }
+    else if (equalsIgnoreCase(token, "bu"))
+    {
+        up = true;
+        action = strtok(nullptr, " \t");
+    }
+    else if (equalsIgnoreCase(token, "bd"))
+    {
+        down = true;
+        action = strtok(nullptr, " \t");
+    }
+    else
+    {
+        strncpy(line, original, kLineBufferSize - 1);
+        line[kLineBufferSize - 1] = '\0';
+        return false;
+    }
+
+    if (action == nullptr)
+    {
+        printVirtualButtonHelp();
+        return true;
+    }
+
+    InputEvent event = InputEvent::None;
+    if (equalsIgnoreCase(action, "short"))
+    {
+        event = up ? InputEvent::KeyUpShort : InputEvent::KeyDownShort;
+    }
+    else if (equalsIgnoreCase(action, "long"))
+    {
+        event = up ? InputEvent::KeyUpLong : InputEvent::KeyDownLong;
+    }
+    else if (equalsIgnoreCase(action, "double"))
+    {
+        event = up ? InputEvent::KeyUpDouble : InputEvent::KeyDownDouble;
+    }
+    else
+    {
+        printVirtualButtonHelp();
+        return true;
+    }
+
+    if (!up && !down)
+    {
+        printVirtualButtonHelp();
+        return true;
+    }
+
+    pushEvent(event);
+    DebugLog::printf("Virtual button: %s %s\r\n", up ? "up" : "down", action);
+    return true;
 }
 
 bool InputManager::parseUiTuningCommand(char *line)

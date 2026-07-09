@@ -41,6 +41,16 @@ namespace
                 return "Unknown";
         }
     }
+
+    bool isButtonInputEvent(InputEvent event)
+    {
+        return event == InputEvent::KeyUpShort ||
+               event == InputEvent::KeyUpLong ||
+               event == InputEvent::KeyUpDouble ||
+               event == InputEvent::KeyDownShort ||
+               event == InputEvent::KeyDownLong ||
+               event == InputEvent::KeyDownDouble;
+    }
 }
 
 RadarApp::RadarApp() :
@@ -229,6 +239,12 @@ void RadarApp::updateInput()
 
 void RadarApp::handleInputEvent(InputEvent event)
 {
+    if (isButtonInputEvent(event))
+    {
+        handleButtonInputEvent(event);
+        return;
+    }
+
     switch (event)
     {
         case InputEvent::ShowHelp:
@@ -381,9 +397,137 @@ void RadarApp::handleInputEvent(InputEvent event)
             ESP.restart();
             break;
 
+        case InputEvent::KeyUpShort:
+        case InputEvent::KeyUpLong:
+        case InputEvent::KeyUpDouble:
+        case InputEvent::KeyDownShort:
+        case InputEvent::KeyDownLong:
+        case InputEvent::KeyDownDouble:
+            break;
+
         case InputEvent::None:
         default:
             break;
+    }
+}
+
+void RadarApp::handleButtonInputEvent(InputEvent event)
+{
+    if (screenSleeping_)
+    {
+        wakeScreenFromSleep();
+        return;
+    }
+
+    switch (event)
+    {
+        case InputEvent::KeyUpShort:
+            if (staSettingsOverlayVisible_ || deviceState_ == DeviceState::SetupPortal)
+            {
+                toggleSetupDisplayMode();
+            }
+            else if (debugMode_ == DebugMode::UiLab)
+            {
+                nextUiLabTheme();
+            }
+            else
+            {
+                switchUiTheme();
+            }
+            break;
+
+        case InputEvent::KeyDownShort:
+            if (staSettingsOverlayVisible_ || deviceState_ == DeviceState::SetupPortal)
+            {
+                toggleSetupDisplayMode();
+            }
+            else
+            {
+                switchRange();
+            }
+            break;
+
+        case InputEvent::KeyUpLong:
+        case InputEvent::KeyDownLong:
+            if (deviceState_ == DeviceState::SetupPortal)
+            {
+                toggleSetupDisplayMode();
+            }
+            else if (staSettingsOverlayVisible_)
+            {
+                hideStaSettingsOverlay();
+            }
+            else if (wifi_.isConnected())
+            {
+                showStaSettingsOverlay();
+            }
+            else
+            {
+                enterSetupPortal("Button long press");
+            }
+            break;
+
+        case InputEvent::KeyUpDouble:
+            if (deviceState_ == DeviceState::SetupPortal || staSettingsOverlayVisible_)
+            {
+                toggleSetupDisplayMode();
+            }
+            else
+            {
+                DebugLog::println("KEY_UP double press: no action in current view.");
+            }
+            break;
+
+        case InputEvent::KeyDownDouble:
+            if (deviceState_ == DeviceState::SetupPortal)
+            {
+                exitSetupPortal();
+            }
+            else if (staSettingsOverlayVisible_)
+            {
+                hideStaSettingsOverlay();
+            }
+            else
+            {
+                DebugLog::println("KEY_DOWN double press: no action in current view.");
+            }
+            break;
+
+        case InputEvent::None:
+        default:
+            break;
+    }
+}
+
+void RadarApp::wakeScreenFromSleep()
+{
+    screenSleeping_ = false;
+    lastIdleDisplayRenderMs_ = millis();
+    DebugLog::println("Screen sleep wake by button input.");
+
+    if (!renderer_.isReady())
+    {
+        return;
+    }
+
+    if (deviceState_ == DeviceState::PausedBySchedule &&
+        settings_.schedule.idleDisplayMode == ScheduleIdleDisplayMode::DisplayOff)
+    {
+        renderer_.renderSystemStatusFrame("AWAKE", "Button input", "");
+        return;
+    }
+
+    if (config_.appMode == AppMode::RealRadar)
+    {
+        renderRealRadarFrame();
+    }
+    else if (config_.appMode == AppMode::RadarDemo)
+    {
+        renderFrame();
+    }
+    else
+    {
+        renderApiTestScreen();
     }
 }
 
@@ -397,6 +541,13 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  q: toggle setup QR/details");
     DebugLog::println("  w: show STA settings URL QR");
     DebugLog::println("  u: switch UI theme");
+    DebugLog::println("Virtual buttons:");
+    DebugLog::println("  btn up short      - simulate KEY_UP short press");
+    DebugLog::println("  btn up long       - simulate KEY_UP long press");
+    DebugLog::println("  btn up double     - simulate KEY_UP double click");
+    DebugLog::println("  btn down short    - simulate KEY_DOWN short press");
+    DebugLog::println("  btn down long     - simulate KEY_DOWN long press");
+    DebugLog::println("  btn down double   - simulate KEY_DOWN double click");
 #if ENABLE_UI_LAB
     DebugLog::println("UI Lab:");
     DebugLog::println("  y: toggle UI Lab");
@@ -1186,6 +1337,7 @@ bool RadarApp::hasActiveOverlay() const
 
 void RadarApp::renderSettingsDisplay(const char *statusText)
 {
+    screenSleeping_ = false;
     renderer_.renderSettingsFrame(configPortal_.apSsid(),
                                   configPortal_.apPassword(),
                                   "192.168.4.1",
@@ -1595,6 +1747,8 @@ void RadarApp::renderRealRadarSystemStatus()
         return;
     }
 
+    screenSleeping_ = false;
+
     if (!wifi_.isConnected())
     {
         renderer_.renderSystemStatusFrame("WIFI LOST", "Reconnecting", "");
@@ -1644,6 +1798,7 @@ void RadarApp::renderPausedIdleFrame(bool force)
     {
         case ScheduleIdleDisplayMode::Clock:
         {
+            screenSleeping_ = false;
             char localTime[8];
             char nextRun[24];
             timeManager_.formatLocalTime(localTime, sizeof(localTime));
@@ -1658,12 +1813,14 @@ void RadarApp::renderPausedIdleFrame(bool force)
             {
                 renderer_.renderBlankFrame();
                 lastIdleDisplayRenderMs_ = millis();
+                screenSleeping_ = true;
             }
             break;
 
         case ScheduleIdleDisplayMode::PausedStatus:
         default:
         {
+            screenSleeping_ = false;
             char line3[24];
             snprintf(line3, sizeof(line3), "Next: %s", nextStart);
             renderer_.renderSystemStatusFrame("PAUSED", "Outside schedule", line3);
@@ -1879,6 +2036,7 @@ void RadarApp::updateSelectedAircraftForList(const Aircraft *aircraft, uint8_t a
 
 void RadarApp::renderFrame()
 {
+    screenSleeping_ = false;
     const AppConfig renderConfig = runtimeRenderConfig();
     renderer_.renderRadarFrame(dataProvider_.aircraft(),
                                dataProvider_.count(),
@@ -1889,6 +2047,7 @@ void RadarApp::renderFrame()
 
 void RadarApp::renderRealRadarFrame()
 {
+    screenSleeping_ = false;
     const AppConfig renderConfig = runtimeRenderConfig();
     renderer_.renderRadarFrame(realAircraft_,
                                realAircraftCount_,
@@ -1900,6 +2059,7 @@ void RadarApp::renderRealRadarFrame()
 
 void RadarApp::renderApiTestScreen()
 {
+    screenSleeping_ = false;
     apiTestView_.render(wifi_, openSky_);
 }
 

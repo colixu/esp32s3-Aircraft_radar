@@ -64,6 +64,7 @@ private:
     SettingsDisplayMode settingsDisplayMode_ = SettingsDisplayMode::ApQr;
     bool staSettingsOverlayVisible_ = false;
     bool wifiManagerStarted_ = false;
+    bool screenSleeping_ = false;
 
     uint8_t selectedAircraftIndex_ = 0;
     uint32_t lastFrameMs_ = 0;
@@ -89,6 +90,8 @@ private:
     void beginRealRadar();
     void updateInput();
     void handleInputEvent(InputEvent event);
+    void handleButtonInputEvent(InputEvent event);
+    void wakeScreenFromSleep();
     void handleUiTuningCommand(const UiTuningCommand &command);
     void printSerialHelp();
     void toggleUiLab();
