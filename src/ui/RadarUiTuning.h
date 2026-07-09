@@ -32,6 +32,10 @@ struct ModernRadarTuning
     float aircraftScale;
     float vectorScale;
     int8_t labelGap;
+
+    bool showStatusText;
+    bool showLeaderLines;
+    uint8_t maxLabels;
 };
 
 struct CyberpunkRadarTuning
@@ -50,12 +54,15 @@ struct CyberpunkRadarTuning
     RgbColor altitudeText;
     RgbColor selected;
     RgbColor sweep;
+    RgbColor map;
 
     float globalBrightness;
     float ringBrightness;
     float textBrightness;
     float aircraftBrightness;
     float sweepBrightness;
+    float mapBrightness;
+    float radialGridBrightness;
 
     uint8_t outerRadius;
     uint8_t innerRadarRadius;
@@ -69,7 +76,26 @@ struct CyberpunkRadarTuning
     float vectorScale;
     float sweepWidth;
     float sweepTrailStrength;
+    float mapDensity;
+    float outerGlowBrightness;
     int8_t labelGap;
+    int16_t bearingLabelRadiusOffset;
+    int16_t cardinalRadiusOffset;
+
+    bool mapEnabled;
+    bool radialGridEnabled;
+    bool bearingLabelsEnabled;
+    bool rangeLabelsEnabled;
+    bool showStatusText;
+    bool showLeaderLines;
+
+    uint8_t radialGridStepDeg;
+    uint8_t bearingLabelStepDeg;
+    uint8_t outerTickStepDeg;
+    uint8_t mediumTickStepDeg;
+    uint8_t majorTickStepDeg;
+    uint8_t outerGlowWidth;
+    uint8_t maxLabels;
 };
 
 struct RadarUiTuning

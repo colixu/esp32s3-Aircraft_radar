@@ -1,9 +1,18 @@
 #include "RadarRenderer.h"
 
 #include <math.h>
+#include <string.h>
 
 #include "../app/DebugLog.h"
 #include "QrCodeRenderer.h"
+
+#ifndef USE_CYBERPUNK_STATIC_BG
+#define USE_CYBERPUNK_STATIC_BG 1
+#endif
+
+#if USE_CYBERPUNK_STATIC_BG
+#include "../data/UI/cyberpunk_bg_240_rgb565.h"
+#endif
 
 namespace
 {
@@ -41,6 +50,59 @@ namespace
         static constexpr uint32_t trackHorizonSec = 45;
         static constexpr int16_t speedLineMinPx = 3;
         static constexpr int16_t speedLineMaxPx = 28;
+    };
+
+    constexpr int16_t kCyberMapWestCoast[][2] =
+    {
+        {47, 64}, {35, 75}, {42, 88}, {34, 102}, {49, 113}, {42, 128},
+        {57, 141}, {50, 156}, {66, 170}, {62, 184}, {78, 190},
+        {93, 180}, {86, 164}, {97, 149}, {84, 135}, {93, 119},
+        {80, 105}, {88, 91}, {72, 81}, {64, 68}, {52, 72}, {47, 64}
+    };
+
+    constexpr int16_t kCyberMapWestInner[][2] =
+    {
+        {43, 76}, {55, 84}, {50, 98}, {65, 108}, {58, 124}, {74, 136},
+        {67, 151}, {82, 162}, {78, 178}, {91, 184}, {81, 165}, {87, 146},
+        {77, 130}, {83, 113}, {70, 96}, {61, 82}, {43, 76}
+    };
+
+    constexpr int16_t kCyberMapWestShelf[][2] =
+    {
+        {21, 92}, {30, 101}, {25, 116}, {37, 129}, {32, 146}, {45, 160},
+        {39, 177}, {54, 190}, {45, 173}, {51, 153}, {42, 135}, {47, 118},
+        {35, 103}, {21, 92}
+    };
+
+    constexpr int16_t kCyberMapEastCoast[][2] =
+    {
+        {148, 151}, {160, 142}, {172, 151}, {186, 143}, {199, 154},
+        {214, 162}, {223, 177}, {216, 190}, {224, 202}, {207, 211},
+        {190, 205}, {176, 213}, {162, 197}, {153, 184}, {146, 166},
+        {148, 151}
+    };
+
+    constexpr int16_t kCyberMapEastIslands[][2] =
+    {
+        {153, 124}, {166, 130}, {176, 124}, {187, 136}, {202, 134},
+        {213, 148}, {205, 156}, {190, 151}, {174, 159}, {163, 146}, {153, 124}
+    };
+
+    constexpr int16_t kCyberMapNorthIslands[][2] =
+    {
+        {126, 49}, {138, 42}, {151, 48}, {164, 40}, {179, 51}, {195, 55},
+        {205, 66}
+    };
+
+    constexpr int16_t kCyberMapInteriorDots[][2] =
+    {
+        {40, 86}, {53, 91}, {65, 98}, {37, 106}, {49, 118}, {61, 132},
+        {42, 149}, {56, 164}, {70, 176}, {84, 185}, {75, 94}, {84, 112},
+        {91, 129}, {87, 151}, {68, 74}, {75, 86}, {58, 148}, {72, 158},
+        {92, 174}, {52, 184}, {157, 158}, {168, 166}, {183, 160}, {198, 170},
+        {207, 186}, {190, 194}, {172, 188}, {159, 177}, {180, 181}, {202, 198},
+        {140, 82}, {153, 76}, {166, 86}, {180, 78}, {195, 91}, {111, 145},
+        {128, 153}, {133, 170}, {143, 98}, {158, 105}, {176, 100}, {190, 112}
     };
 
     void drawModernWideLine(TFT_eSprite &canvas,
@@ -193,7 +255,8 @@ uint16_t RadarRenderer::cyberNoiseColor()
 
 uint16_t RadarRenderer::cyberOuterRingColor()
 {
-    return cyberpunkColor(cyberpunkTuning().outerRing, cyberpunkTuning().ringBrightness);
+    return cyberpunkColor(cyberpunkTuning().outerRing,
+                          cyberpunkTuning().ringBrightness * cyberpunkTuning().outerGlowBrightness);
 }
 
 uint16_t RadarRenderer::cyberRingColor()
@@ -251,6 +314,16 @@ uint16_t RadarRenderer::cyberSweepColor()
     return cyberpunkColor(cyberpunkTuning().sweep, cyberpunkTuning().sweepBrightness);
 }
 
+uint16_t RadarRenderer::cyberMapColor()
+{
+    return cyberpunkColor(cyberpunkTuning().map, cyberpunkTuning().mapBrightness);
+}
+
+uint16_t RadarRenderer::cyberRadialGridColor()
+{
+    return cyberpunkColor(cyberpunkTuning().ringDim, cyberpunkTuning().radialGridBrightness);
+}
+
 void RadarRenderer::renderRadarFrame(const Aircraft *aircraft,
                                      uint8_t aircraftCount,
                                      uint8_t selectedAircraftIndex,
@@ -298,10 +371,20 @@ void RadarRenderer::renderModernRadarFrame(const Aircraft *aircraft,
                                            const char *statusText)
 {
     (void)selectedAircraftIndex;
-    (void)statusText;
 
     drawModernReferenceRadarFrame(frame_, config);
-    drawModernReferenceAircraft(frame_, aircraft, aircraftCount, config);
+    drawModernReferenceAircraft(frame_, aircraft, aircraftCount, selectedAircraftIndex, config);
+    const bool statusLooksImportant = statusText != nullptr &&
+                                      (strstr(statusText, "WIFI") != nullptr ||
+                                       strstr(statusText, "AUTH") != nullptr ||
+                                       strstr(statusText, "API") != nullptr ||
+                                       strstr(statusText, "429") != nullptr ||
+                                       strstr(statusText, "ERR") != nullptr ||
+                                       strstr(statusText, "NO ") != nullptr);
+    if (modernTuning().showStatusText || statusLooksImportant)
+    {
+        drawStatusText(frame_, statusText);
+    }
     frame_.pushSprite(0, 0);
 }
 
@@ -397,6 +480,7 @@ void RadarRenderer::drawModernReferenceCenterDot(TFT_eSprite &canvas)
 void RadarRenderer::drawModernReferenceAircraft(TFT_eSprite &canvas,
                                                 const Aircraft *aircraft,
                                                 uint8_t aircraftCount,
+                                                uint8_t selectedAircraftIndex,
                                                 const AppConfig &config)
 {
     if (aircraft == nullptr)
@@ -415,17 +499,9 @@ void RadarRenderer::drawModernReferenceAircraft(TFT_eSprite &canvas,
         }
     }
 
-    for (uint8_t i = 0; i < aircraftCount; ++i)
-    {
-        int16_t x = 0;
-        int16_t y = 0;
-        bool insideOuterRing = false;
-        if (modernReferenceToScreen(aircraft[i], config, x, y, insideOuterRing) && insideOuterRing)
-        {
-            drawModernReferenceSpeedVector(canvas, aircraft[i], x, y);
-        }
-    }
-
+    LabelRect usedLabels[kMaxTrackedLabels];
+    uint8_t usedLabelCount = 0;
+    uint8_t shownLabelCount = 0;
     for (uint8_t i = 0; i < aircraftCount; ++i)
     {
         int16_t x = 0;
@@ -434,9 +510,26 @@ void RadarRenderer::drawModernReferenceAircraft(TFT_eSprite &canvas,
         if (modernReferenceToScreen(aircraft[i], config, x, y, insideOuterRing) && insideOuterRing)
         {
             drawModernReferenceAircraftSymbol(canvas, aircraft[i], x, y);
-            if (config.showLabels)
+            if (config.showLabels &&
+                shouldShowAircraftLabel(aircraft[i],
+                                        i,
+                                        selectedAircraftIndex,
+                                        aircraftCount,
+                                        shownLabelCount,
+                                        modernTuning().maxLabels))
             {
-                drawModernReferenceAircraftTag(canvas, aircraft[i], x, y);
+                const uint8_t before = usedLabelCount;
+                drawModernReferenceAircraftTag(canvas,
+                                               aircraft[i],
+                                               x,
+                                               y,
+                                               i == selectedAircraftIndex,
+                                               usedLabels,
+                                               usedLabelCount);
+                if (usedLabelCount != before)
+                {
+                    ++shownLabelCount;
+                }
             }
         }
     }
@@ -500,7 +593,10 @@ void RadarRenderer::drawModernReferenceSpeedVector(TFT_eSprite &canvas,
 void RadarRenderer::drawModernReferenceAircraftTag(TFT_eSprite &canvas,
                                                    const Aircraft &target,
                                                    int16_t x,
-                                                   int16_t y)
+                                                   int16_t y,
+                                                   bool selected,
+                                                   LabelRect *usedLabels,
+                                                   uint8_t &usedLabelCount)
 {
     char callsign[16];
     char altitude[16];
@@ -511,36 +607,101 @@ void RadarRenderer::drawModernReferenceAircraftTag(TFT_eSprite &canvas,
     snprintf(altitude, sizeof(altitude), "%.0fm", target.altitudeM);
 
     const ModernRadarTuning &tuning = modernTuning();
-    const bool labelRight = x < ModernRadarTheme::centerX;
+    bool labelRight = x < ModernRadarTheme::centerX;
     const int16_t symbolHalf = static_cast<int16_t>((ModernRadarTheme::noseLength +
                                                      ModernRadarTheme::tailHalfWidth) *
                                                     tuning.aircraftScale);
-    const int16_t labelWidth = max(canvas.textWidth(callsign, 1), canvas.textWidth(altitude, 1));
-    const int16_t blockHeight = 20;
-    int16_t anchorX = labelRight ?
-                      x + symbolHalf + tuning.labelGap :
-                      x - symbolHalf - tuning.labelGap;
+    const int16_t labelWidth = selected ?
+                               max(canvas.textWidth(callsign, 1), canvas.textWidth(altitude, 1)) :
+                               canvas.textWidth(callsign, 1);
+    const int16_t blockHeight = selected ? 20 : 10;
     int16_t labelY = constrain(y - blockHeight / 2, 2, ModernRadarTheme::size - blockHeight - 2);
+    int16_t anchorX = 0;
+    LabelRect rect = {0, 0, 0, 0};
+    bool reserved = false;
 
+    for (uint8_t attempt = 0; attempt < 5 && !reserved; ++attempt)
+    {
+        labelRight = attempt == 3 ? !labelRight : labelRight;
+        int16_t candidateY = labelY;
+        if (attempt == 1)
+        {
+            candidateY = constrain(labelY - 12, 2, ModernRadarTheme::size - blockHeight - 2);
+        }
+        else if (attempt == 2)
+        {
+            candidateY = constrain(labelY + 12, 2, ModernRadarTheme::size - blockHeight - 2);
+        }
+        else if (attempt == 4)
+        {
+            candidateY = constrain(labelY + 22, 2, ModernRadarTheme::size - blockHeight - 2);
+        }
+
+        anchorX = labelRight ?
+                  x + symbolHalf + tuning.labelGap + 2 :
+                  x - symbolHalf - tuning.labelGap - 2;
+
+        if (labelRight)
+        {
+            anchorX = constrain(anchorX, 2, ModernRadarTheme::size - labelWidth - 2);
+            rect = {static_cast<int16_t>(anchorX - 1), static_cast<int16_t>(candidateY - 1), static_cast<int16_t>(labelWidth + 2), static_cast<int16_t>(blockHeight + 2)};
+        }
+        else
+        {
+            anchorX = constrain(anchorX, labelWidth + 2, ModernRadarTheme::size - 2);
+            rect = {static_cast<int16_t>(anchorX - labelWidth - 1), static_cast<int16_t>(candidateY - 1), static_cast<int16_t>(labelWidth + 2), static_cast<int16_t>(blockHeight + 2)};
+        }
+
+        if (reserveLabelRect(usedLabels, usedLabelCount, rect))
+        {
+            labelY = candidateY;
+            reserved = true;
+        }
+    }
+
+    if (!reserved)
+    {
+        if (!selected)
+        {
+            return;
+        }
+        if (usedLabelCount < kMaxTrackedLabels)
+        {
+            usedLabels[usedLabelCount++] = rect;
+        }
+    }
+
+    if (modernTuning().showLeaderLines)
+    {
+        canvas.drawLine(x,
+                        y,
+                        labelRight ? rect.x : static_cast<int16_t>(rect.x + rect.w),
+                        static_cast<int16_t>(labelY + 4),
+                        modernGridColor());
+    }
+
+    canvas.fillRect(rect.x, rect.y, rect.w, rect.h, modernBackgroundColor());
     if (labelRight)
     {
-        anchorX = constrain(anchorX, 2, ModernRadarTheme::size - labelWidth - 2);
-        canvas.fillRect(anchorX - 1, labelY - 1, labelWidth + 2, blockHeight + 2, modernBackgroundColor());
         canvas.setTextDatum(TL_DATUM);
         canvas.setTextColor(modernTextColor(), modernBackgroundColor());
         canvas.drawString(callsign, anchorX, labelY, 1);
-        canvas.setTextColor(modernAltitudeColor(), modernBackgroundColor());
-        canvas.drawString(altitude, anchorX, labelY + 10, 1);
+        if (selected)
+        {
+            canvas.setTextColor(modernAltitudeColor(), modernBackgroundColor());
+            canvas.drawString(altitude, anchorX, labelY + 10, 1);
+        }
         return;
     }
 
-    anchorX = constrain(anchorX, labelWidth + 2, ModernRadarTheme::size - 2);
-    canvas.fillRect(anchorX - labelWidth - 1, labelY - 1, labelWidth + 2, blockHeight + 2, modernBackgroundColor());
     canvas.setTextDatum(TR_DATUM);
     canvas.setTextColor(modernTextColor(), modernBackgroundColor());
     canvas.drawString(callsign, anchorX, labelY, 1);
-    canvas.setTextColor(modernAltitudeColor(), modernBackgroundColor());
-    canvas.drawString(altitude, anchorX, labelY + 10, 1);
+    if (selected)
+    {
+        canvas.setTextColor(modernAltitudeColor(), modernBackgroundColor());
+        canvas.drawString(altitude, anchorX, labelY + 10, 1);
+    }
 }
 
 void RadarRenderer::drawModernReferenceBeyondDot(TFT_eSprite &canvas, const Aircraft &target)
@@ -680,36 +841,208 @@ void RadarRenderer::renderCyberpunkRadarFrame(const Aircraft *aircraft,
                                               const AppConfig &config,
                                               const char *statusText)
 {
+#if USE_CYBERPUNK_STATIC_BG
+    drawCyberpunkStaticBackground(frame_);
+    drawCyberpunkStaticCardinals(frame_);
+#else
     drawCyberpunkBackground(frame_);
+    drawCyberpunkMapTexture(frame_);
+    drawCyberpunkRadialGrid(frame_);
     drawCyberpunkRings(frame_);
-    drawCyberpunkOuterTicks(frame_);
-    drawCyberpunkCrosshair(frame_);
-    drawCyberpunkSweep(frame_);
+    drawCyberpunkOuterScale(frame_);
+    drawCyberpunkRangeLabels(frame_, config);
     drawCyberpunkCenter(frame_);
     drawCyberpunkCardinals(frame_);
+#endif
     drawCyberpunkAircraftTargets(frame_, aircraft, aircraftCount, selectedAircraftIndex, config);
     drawCyberpunkStatusText(frame_, statusText, aircraftCount, config);
     frame_.pushSprite(0, 0);
 }
 
-void RadarRenderer::drawCyberpunkBackground(TFT_eSprite &canvas)
+#if USE_CYBERPUNK_STATIC_BG
+void RadarRenderer::drawCyberpunkStaticBackground(TFT_eSprite &canvas)
+{
+    canvas.setSwapBytes(true);
+    canvas.pushImage(0,
+                     0,
+                     CYBERPUNK_BG_WIDTH,
+                     CYBERPUNK_BG_HEIGHT,
+                     CYBERPUNK_BG_240);
+    canvas.setSwapBytes(false);
+}
+
+void RadarRenderer::drawCyberpunkStaticCardinals(TFT_eSprite &canvas)
 {
     const CyberpunkRadarTuning &tuning = cyberpunkTuning();
-    canvas.fillSprite(cyberBackgroundColor());
+    const uint16_t color = color565Scaled(tuning.outerRing, tuning.globalBrightness, 1.2f);
 
-    const int32_t radiusSq = static_cast<int32_t>(tuning.outerRadius) *
-                             static_cast<int32_t>(tuning.outerRadius);
-    const uint16_t noise = cyberNoiseColor();
-    for (uint8_t i = 0; i < 64; ++i)
+    canvas.setTextColor(color);
+    canvas.setTextDatum(MC_DATUM);
+    canvas.drawString("N", CyberpunkRadarTheme::centerX, 17, 1);
+    canvas.drawString("W", 16, CyberpunkRadarTheme::centerY, 1);
+    canvas.drawString("S", CyberpunkRadarTheme::centerX, 224, 1);
+    canvas.drawString("E", 224, CyberpunkRadarTheme::centerY, 1);
+}
+#endif
+
+void RadarRenderer::drawCyberpunkBackground(TFT_eSprite &canvas)
+{
+    canvas.fillSprite(cyberBackgroundColor());
+}
+
+void RadarRenderer::drawCyberpunkMapTexture(TFT_eSprite &canvas)
+{
+    const CyberpunkRadarTuning &tuning = cyberpunkTuning();
+    if (!tuning.mapEnabled)
     {
-        const int16_t x = static_cast<int16_t>((i * 47U + 31U) % CyberpunkRadarTheme::size);
-        const int16_t y = static_cast<int16_t>((i * 73U + 19U) % CyberpunkRadarTheme::size);
-        const int16_t dx = x - CyberpunkRadarTheme::centerX;
-        const int16_t dy = y - CyberpunkRadarTheme::centerY;
-        if (static_cast<int32_t>(dx) * dx + static_cast<int32_t>(dy) * dy <= radiusSq)
+        return;
+    }
+
+    const uint16_t mapColor = cyberMapColor();
+    drawCyberpunkDottedMapPath(canvas,
+                               kCyberMapWestCoast,
+                               sizeof(kCyberMapWestCoast) / sizeof(kCyberMapWestCoast[0]),
+                               mapColor,
+                               4);
+    drawCyberpunkDottedMapPath(canvas,
+                               kCyberMapEastCoast,
+                               sizeof(kCyberMapEastCoast) / sizeof(kCyberMapEastCoast[0]),
+                               mapColor);
+    drawCyberpunkDottedMapPath(canvas,
+                               kCyberMapEastIslands,
+                               sizeof(kCyberMapEastIslands) / sizeof(kCyberMapEastIslands[0]),
+                               mapColor);
+    drawCyberpunkDottedMapPath(canvas,
+                               kCyberMapNorthIslands,
+                               sizeof(kCyberMapNorthIslands) / sizeof(kCyberMapNorthIslands[0]),
+                               mapColor);
+    drawCyberpunkMapDots(canvas,
+                         kCyberMapInteriorDots,
+                         sizeof(kCyberMapInteriorDots) / sizeof(kCyberMapInteriorDots[0]),
+                         mapColor);
+
+    const uint16_t noise = cyberNoiseColor();
+    const uint16_t noisePointCount = static_cast<uint16_t>(58.0f * tuning.mapDensity);
+    for (uint16_t i = 0; i < noisePointCount; ++i)
+    {
+        const uint16_t seed = static_cast<uint16_t>(i * i * 29U + i * 97U + 53U);
+        const int16_t x = static_cast<int16_t>((seed * 37U + 19U) % CyberpunkRadarTheme::size);
+        const int16_t y = static_cast<int16_t>((seed * 61U + i * 11U + 43U) % CyberpunkRadarTheme::size);
+        if (cyberpunkPointInsideOuter(x, y))
         {
             canvas.drawPixel(x, y, noise);
         }
+    }
+}
+
+void RadarRenderer::drawCyberpunkDottedMapPath(TFT_eSprite &canvas,
+                                               const int16_t points[][2],
+                                               uint8_t pointCount,
+                                               uint16_t color,
+                                               uint8_t baseSpacing)
+{
+    if (points == nullptr || pointCount < 2)
+    {
+        return;
+    }
+
+    const uint8_t spacing = max<uint8_t>(2, baseSpacing);
+    for (uint8_t i = 1; i < pointCount; ++i)
+    {
+        const int16_t x0 = points[i - 1][0];
+        const int16_t y0 = points[i - 1][1];
+        const int16_t x1 = points[i][0];
+        const int16_t y1 = points[i][1];
+        const int16_t dx = x1 - x0;
+        const int16_t dy = y1 - y0;
+        const int16_t steps = max(abs(dx), abs(dy));
+        const int16_t divisor = steps > 0 ? steps : 1;
+        const int16_t normalX = dy == 0 ? 0 : (dy > 0 ? 1 : -1);
+        const int16_t normalY = dx == 0 ? 0 : (dx > 0 ? -1 : 1);
+        int16_t step = 0;
+        while (step <= steps)
+        {
+            const int16_t x = x0 + static_cast<int16_t>((static_cast<int32_t>(dx) * step) / divisor);
+            const int16_t y = y0 + static_cast<int16_t>((static_cast<int32_t>(dy) * step) / divisor);
+            const int16_t jitter = ((step + i * 5) % 4) == 0 ? 1 : (((step + i * 7) % 5) == 0 ? -1 : 0);
+            const int16_t dotX = x + normalX * jitter;
+            const int16_t dotY = y + normalY * jitter;
+            if (cyberpunkPointInsideOuter(dotX, dotY))
+            {
+                canvas.drawPixel(dotX, dotY, color);
+                if (((step + i) % 11) == 0 && cyberpunkPointInsideOuter(dotX + normalX, dotY + normalY))
+                {
+                    canvas.drawPixel(dotX + normalX, dotY + normalY, color);
+                }
+            }
+
+            step += spacing + ((step + i * 3) % 4);
+        }
+    }
+}
+
+void RadarRenderer::drawCyberpunkMapDots(TFT_eSprite &canvas,
+                                         const int16_t points[][2],
+                                         uint8_t pointCount,
+                                         uint16_t color)
+{
+    if (points == nullptr || pointCount == 0)
+    {
+        return;
+    }
+
+    const CyberpunkRadarTuning &tuning = cyberpunkTuning();
+    const uint8_t stride = tuning.mapDensity < 0.65f ? 3 : (tuning.mapDensity < 1.1f ? 2 : 1);
+    for (uint8_t i = 0; i < pointCount; ++i)
+    {
+        if ((i % stride) != 0)
+        {
+            continue;
+        }
+
+        const int16_t x = points[i][0];
+        const int16_t y = points[i][1];
+        const bool leftMapDot = x < CyberpunkRadarTheme::centerX - 8;
+        if (leftMapDot && (i % 5) != 0)
+        {
+            continue;
+        }
+
+        if (cyberpunkPointInsideOuter(x, y))
+        {
+            canvas.drawPixel(x, y, color);
+            if (!leftMapDot && tuning.mapDensity > 1.35f && cyberpunkPointInsideOuter(x + 1, y))
+            {
+                canvas.drawPixel(x + 1, y, color);
+            }
+        }
+    }
+}
+
+void RadarRenderer::drawCyberpunkRadialGrid(TFT_eSprite &canvas)
+{
+    const CyberpunkRadarTuning &tuning = cyberpunkTuning();
+    if (!tuning.radialGridEnabled)
+    {
+        return;
+    }
+
+    const uint8_t stepDeg = max<uint8_t>(tuning.radialGridStepDeg, 1);
+    for (uint16_t deg = 0; deg < 360; deg += stepDeg)
+    {
+        if ((deg % 90) == 0)
+        {
+            continue;
+        }
+
+        const float radians = static_cast<float>(deg) * DEG_TO_RAD;
+        const int16_t endX = CyberpunkRadarTheme::centerX +
+                             static_cast<int16_t>(sinf(radians) * tuning.innerRadarRadius);
+        const int16_t endY = CyberpunkRadarTheme::centerY -
+                             static_cast<int16_t>(cosf(radians) * tuning.innerRadarRadius);
+        const float local = tuning.radialGridBrightness * ((deg % 30) == 0 ? 1.25f : 0.75f);
+        const uint16_t color = color565Scaled(tuning.ringDim, tuning.globalBrightness, local);
+        canvas.drawLine(CyberpunkRadarTheme::centerX, CyberpunkRadarTheme::centerY, endX, endY, color);
     }
 }
 
@@ -719,74 +1052,114 @@ void RadarRenderer::drawCyberpunkRings(TFT_eSprite &canvas)
     const uint8_t ringCount = max<uint8_t>(tuning.ringCount, 1);
     const uint8_t width = max<uint8_t>(tuning.lineWidth, 1);
 
-    drawModernWideCircle(canvas,
-                         CyberpunkRadarTheme::centerX,
-                         CyberpunkRadarTheme::centerY,
-                         tuning.outerRadius,
-                         cyberOuterRingColor(),
-                         width);
+    if (tuning.outerGlowWidth > 0)
+    {
+        drawModernWideCircle(canvas,
+                             CyberpunkRadarTheme::centerX,
+                             CyberpunkRadarTheme::centerY,
+                             tuning.outerRadius,
+                             cyberOuterRingColor(),
+                             tuning.outerGlowWidth);
+    }
     canvas.drawCircle(CyberpunkRadarTheme::centerX,
                       CyberpunkRadarTheme::centerY,
                       tuning.outerRadius - 3,
-                      cyberRingDimColor());
+                      color565Scaled(tuning.ringDim, tuning.globalBrightness, tuning.ringBrightness * 0.65f));
 
     for (uint8_t i = 1; i <= ringCount; ++i)
     {
         const int16_t radius = (static_cast<int16_t>(tuning.innerRadarRadius) * i) / ringCount;
-        const uint16_t color = i == ringCount ? cyberRingColor() : cyberRingDimColor();
         drawModernWideCircle(canvas,
                              CyberpunkRadarTheme::centerX,
                              CyberpunkRadarTheme::centerY,
                              radius,
-                             color,
+                             cyberRingDimColor(),
                              width);
     }
 }
 
-void RadarRenderer::drawCyberpunkOuterTicks(TFT_eSprite &canvas)
+void RadarRenderer::drawCyberpunkOuterScale(TFT_eSprite &canvas)
 {
     const CyberpunkRadarTuning &tuning = cyberpunkTuning();
-    for (uint16_t deg = 0; deg < 360; deg += 10)
+    const uint8_t outerStep = max<uint8_t>(tuning.outerTickStepDeg, 1);
+    const uint8_t mediumStep = max<uint8_t>(tuning.mediumTickStepDeg, outerStep);
+    const uint8_t majorStep = max<uint8_t>(tuning.majorTickStepDeg, mediumStep);
+
+    for (uint16_t deg = 0; deg < 360; deg += outerStep)
     {
-        const bool major = deg % 30 == 0;
+        const bool major = (deg % majorStep) == 0;
+        const bool medium = (deg % mediumStep) == 0;
         const float radians = static_cast<float>(deg) * DEG_TO_RAD;
-        const int16_t tickLength = major ? tuning.majorTickLength : tuning.minorTickLength;
-        const int16_t outer = tuning.outerRadius;
+        const int16_t tickLength = major ?
+                                   tuning.majorTickLength :
+                                   (medium ? max<uint8_t>(tuning.minorTickLength + 2, tuning.minorTickLength) :
+                                    tuning.minorTickLength);
+        const int16_t outer = tuning.outerRadius - 1;
         const int16_t inner = outer - tickLength;
         const int16_t x0 = CyberpunkRadarTheme::centerX + static_cast<int16_t>(sinf(radians) * outer);
         const int16_t y0 = CyberpunkRadarTheme::centerY - static_cast<int16_t>(cosf(radians) * outer);
         const int16_t x1 = CyberpunkRadarTheme::centerX + static_cast<int16_t>(sinf(radians) * inner);
         const int16_t y1 = CyberpunkRadarTheme::centerY - static_cast<int16_t>(cosf(radians) * inner);
-        canvas.drawLine(x0, y0, x1, y1, major ? cyberTickColor() : cyberRingDimColor());
+        const uint16_t color = major ? cyberTickColor() : (medium ? cyberRingColor() : cyberRingDimColor());
+        canvas.drawLine(x0, y0, x1, y1, color);
+
+    }
+
+    drawCyberpunkBearingLabels(canvas);
+}
+
+void RadarRenderer::drawCyberpunkBearingLabels(TFT_eSprite &canvas)
+{
+    const CyberpunkRadarTuning &tuning = cyberpunkTuning();
+    if (!tuning.bearingLabelsEnabled)
+    {
+        return;
+    }
+
+    const uint8_t labelStep = max<uint8_t>(tuning.bearingLabelStepDeg, 30);
+    const int16_t labelRadius = constrain(static_cast<int16_t>(tuning.outerRadius + tuning.bearingLabelRadiusOffset),
+                                          static_cast<int16_t>(tuning.outerRadius - 20),
+                                          static_cast<int16_t>(tuning.outerRadius + 2));
+    canvas.setTextColor(cyberTickColor(), cyberBackgroundColor());
+    canvas.setTextDatum(MC_DATUM);
+
+    for (uint16_t deg = labelStep; deg < 360; deg += labelStep)
+    {
+        if ((deg % 90) == 0)
+        {
+            continue;
+        }
+
+        char label[4];
+        snprintf(label, sizeof(label), "%03u", deg);
+        const float radians = static_cast<float>(deg) * DEG_TO_RAD;
+        const int16_t x = CyberpunkRadarTheme::centerX + static_cast<int16_t>(sinf(radians) * labelRadius);
+        const int16_t y = CyberpunkRadarTheme::centerY - static_cast<int16_t>(cosf(radians) * labelRadius);
+        canvas.drawString(label, x, y, 1);
     }
 }
 
 void RadarRenderer::drawCyberpunkCardinals(TFT_eSprite &canvas)
 {
     const CyberpunkRadarTuning &tuning = cyberpunkTuning();
-    const int16_t radius = tuning.outerRadius - 16;
+    const int16_t radius = constrain(static_cast<int16_t>(tuning.outerRadius + tuning.cardinalRadiusOffset),
+                                     static_cast<int16_t>(tuning.outerRadius - 20),
+                                     static_cast<int16_t>(tuning.outerRadius + 2));
 
-    canvas.setTextColor(cyberTextColor(), cyberBackgroundColor());
+    canvas.setTextColor(color565Scaled(tuning.outerRing, tuning.globalBrightness, 1.15f),
+                        cyberBackgroundColor());
     canvas.setTextDatum(MC_DATUM);
     canvas.drawString("N", CyberpunkRadarTheme::centerX, CyberpunkRadarTheme::centerY - radius, 2);
     canvas.drawString("S", CyberpunkRadarTheme::centerX, CyberpunkRadarTheme::centerY + radius, 2);
     canvas.drawString("E", CyberpunkRadarTheme::centerX + radius, CyberpunkRadarTheme::centerY, 2);
     canvas.drawString("W", CyberpunkRadarTheme::centerX - radius, CyberpunkRadarTheme::centerY, 2);
 
-    canvas.drawTriangle(CyberpunkRadarTheme::centerX,
-                        CyberpunkRadarTheme::centerY - tuning.outerRadius + 4,
-                        CyberpunkRadarTheme::centerX - 4,
-                        CyberpunkRadarTheme::centerY - tuning.outerRadius + 12,
-                        CyberpunkRadarTheme::centerX + 4,
-                        CyberpunkRadarTheme::centerY - tuning.outerRadius + 12,
-                        cyberMagentaColor());
 }
 
 void RadarRenderer::drawCyberpunkCrosshair(TFT_eSprite &canvas)
 {
     const CyberpunkRadarTuning &tuning = cyberpunkTuning();
     const int16_t radius = tuning.innerRadarRadius;
-    const uint16_t dim = cyberRingDimColor();
 
     canvas.drawLine(CyberpunkRadarTheme::centerX - radius,
                     CyberpunkRadarTheme::centerY,
@@ -798,17 +1171,36 @@ void RadarRenderer::drawCyberpunkCrosshair(TFT_eSprite &canvas)
                     CyberpunkRadarTheme::centerX,
                     CyberpunkRadarTheme::centerY + radius,
                     cyberCrosshairColor());
+}
 
-    for (uint16_t deg = 45; deg < 360; deg += 90)
+void RadarRenderer::drawCyberpunkRangeLabels(TFT_eSprite &canvas, const AppConfig &config)
+{
+    const CyberpunkRadarTuning &tuning = cyberpunkTuning();
+    if (!tuning.rangeLabelsEnabled)
     {
-        const float radians = static_cast<float>(deg) * DEG_TO_RAD;
-        const int16_t x = static_cast<int16_t>(sinf(radians) * radius);
-        const int16_t y = static_cast<int16_t>(cosf(radians) * radius);
-        canvas.drawLine(CyberpunkRadarTheme::centerX - x,
-                        CyberpunkRadarTheme::centerY + y,
-                        CyberpunkRadarTheme::centerX + x,
-                        CyberpunkRadarTheme::centerY - y,
-                        dim);
+        return;
+    }
+
+    const uint8_t steps = min<uint8_t>(tuning.ringCount, 5);
+    const float maxRangeKm = max(config.maxRangeKm, 1.0f);
+    canvas.setTextDatum(MR_DATUM);
+    canvas.setTextColor(cyberAltitudeColor(), cyberBackgroundColor());
+
+    for (uint8_t i = 1; i <= steps; ++i)
+    {
+        const int16_t radius = (static_cast<int16_t>(tuning.innerRadarRadius) * i) / steps;
+        const int16_t y = CyberpunkRadarTheme::centerY - radius;
+        if (y < 22)
+        {
+            continue;
+        }
+
+        char label[8];
+        snprintf(label, sizeof(label), "%.0f", (maxRangeKm * i) / steps);
+        const int16_t x = CyberpunkRadarTheme::centerX - 4;
+        const int16_t width = canvas.textWidth(label, 1);
+        canvas.fillRect(x - width - 2, y - 4, width + 4, 9, cyberBackgroundColor());
+        canvas.drawString(label, x, y, 1);
     }
 }
 
@@ -871,17 +1263,9 @@ void RadarRenderer::drawCyberpunkAircraftTargets(TFT_eSprite &canvas,
         return;
     }
 
-    for (uint8_t i = 0; i < aircraftCount; ++i)
-    {
-        int16_t x = 0;
-        int16_t y = 0;
-        bool inside = false;
-        if (cyberpunkToScreen(aircraft[i], config, x, y, inside) && inside)
-        {
-            drawCyberpunkSpeedVector(canvas, aircraft[i], x, y);
-        }
-    }
-
+    LabelRect usedLabels[kMaxTrackedLabels];
+    uint8_t usedLabelCount = 0;
+    uint8_t shownLabelCount = 0;
     for (uint8_t i = 0; i < aircraftCount; ++i)
     {
         int16_t x = 0;
@@ -894,9 +1278,26 @@ void RadarRenderer::drawCyberpunkAircraftTargets(TFT_eSprite &canvas,
 
         const bool selected = i == selectedAircraftIndex;
         drawCyberpunkAircraftSymbol(canvas, aircraft[i], x, y, selected);
-        if (config.showLabels && (selected || aircraftCount <= 6 || (i % 3) == 0))
+        if (config.showLabels &&
+            shouldShowAircraftLabel(aircraft[i],
+                                    i,
+                                    selectedAircraftIndex,
+                                    aircraftCount,
+                                    shownLabelCount,
+                                    cyberpunkTuning().maxLabels))
         {
-            drawCyberpunkAircraftLabel(canvas, aircraft[i], x, y, selected);
+            const uint8_t before = usedLabelCount;
+            drawCyberpunkAircraftLabel(canvas,
+                                       aircraft[i],
+                                       x,
+                                       y,
+                                       selected,
+                                       usedLabels,
+                                       usedLabelCount);
+            if (usedLabelCount != before)
+            {
+                ++shownLabelCount;
+            }
         }
     }
 }
@@ -907,30 +1308,60 @@ void RadarRenderer::drawCyberpunkAircraftSymbol(TFT_eSprite &canvas,
                                                 int16_t y,
                                                 bool selected)
 {
+    const float headingDeg = isfinite(target.headingDeg) ? target.headingDeg : target.bearingDeg;
+    drawCyberpunkAircraftSilhouette(canvas, x, y, headingDeg, selected);
+}
+
+void RadarRenderer::drawCyberpunkAircraftSilhouette(TFT_eSprite &canvas,
+                                                    int16_t x,
+                                                    int16_t y,
+                                                    float headingDeg,
+                                                    bool selected)
+{
     const CyberpunkRadarTuning &tuning = cyberpunkTuning();
     const float scale = tuning.aircraftScale;
-    const float noseLength = CyberpunkRadarTheme::aircraftNoseLength * scale;
-    const float tailLength = CyberpunkRadarTheme::aircraftTailLength * scale;
-    const float tailHalfWidth = CyberpunkRadarTheme::aircraftTailHalfWidth * scale;
-    const float headingDeg = isfinite(target.headingDeg) ? target.headingDeg : target.bearingDeg;
-    const float heading = headingDeg * DEG_TO_RAD;
-    const float normal = heading + HALF_PI;
+    int16_t noseX = 0;
+    int16_t noseY = 0;
+    int16_t tailX = 0;
+    int16_t tailY = 0;
+    int16_t bodyX = 0;
+    int16_t bodyY = 0;
+    int16_t leftWingX = 0;
+    int16_t leftWingY = 0;
+    int16_t rightWingX = 0;
+    int16_t rightWingY = 0;
+    int16_t leftTailX = 0;
+    int16_t leftTailY = 0;
+    int16_t rightTailX = 0;
+    int16_t rightTailY = 0;
 
-    const int16_t noseX = x + static_cast<int16_t>(sinf(heading) * noseLength);
-    const int16_t noseY = y - static_cast<int16_t>(cosf(heading) * noseLength);
-    const int16_t tailCenterX = x - static_cast<int16_t>(sinf(heading) * tailLength);
-    const int16_t tailCenterY = y + static_cast<int16_t>(cosf(heading) * tailLength);
-    const int16_t tailLeftX = tailCenterX + static_cast<int16_t>(sinf(normal) * tailHalfWidth);
-    const int16_t tailLeftY = tailCenterY - static_cast<int16_t>(cosf(normal) * tailHalfWidth);
-    const int16_t tailRightX = tailCenterX - static_cast<int16_t>(sinf(normal) * tailHalfWidth);
-    const int16_t tailRightY = tailCenterY + static_cast<int16_t>(cosf(normal) * tailHalfWidth);
+    rotateCyberpunkAircraftPoint(0.0f, -8.0f, headingDeg, scale, x, y, noseX, noseY);
+    rotateCyberpunkAircraftPoint(0.0f, 6.0f, headingDeg, scale, x, y, tailX, tailY);
+    rotateCyberpunkAircraftPoint(0.0f, 1.0f, headingDeg, scale, x, y, bodyX, bodyY);
+    rotateCyberpunkAircraftPoint(-6.0f, 1.0f, headingDeg, scale, x, y, leftWingX, leftWingY);
+    rotateCyberpunkAircraftPoint(6.0f, 1.0f, headingDeg, scale, x, y, rightWingX, rightWingY);
+    rotateCyberpunkAircraftPoint(-3.0f, 6.0f, headingDeg, scale, x, y, leftTailX, leftTailY);
+    rotateCyberpunkAircraftPoint(3.0f, 6.0f, headingDeg, scale, x, y, rightTailX, rightTailY);
 
-    canvas.drawCircle(x, y, selected ? 7 : 4, selected ? cyberSelectedColor() : cyberAircraftGlowColor());
-    canvas.fillTriangle(noseX, noseY, tailLeftX, tailLeftY, tailRightX, tailRightY, cyberAircraftColor());
+    const uint16_t glow = cyberAircraftGlowColor();
+    const uint16_t body = cyberAircraftColor();
+    drawModernWideLine(canvas, noseX, noseY, tailX, tailY, glow, 3);
+    drawModernWideLine(canvas, bodyX, bodyY, leftWingX, leftWingY, glow, 3);
+    drawModernWideLine(canvas, bodyX, bodyY, rightWingX, rightWingY, glow, 3);
+    drawModernWideLine(canvas, tailX, tailY, leftTailX, leftTailY, glow, 2);
+    drawModernWideLine(canvas, tailX, tailY, rightTailX, rightTailY, glow, 2);
+
+    drawModernWideLine(canvas, noseX, noseY, tailX, tailY, body, 1);
+    drawModernWideLine(canvas, bodyX, bodyY, leftWingX, leftWingY, body, 1);
+    drawModernWideLine(canvas, bodyX, bodyY, rightWingX, rightWingY, body, 1);
+    canvas.drawLine(tailX, tailY, leftTailX, leftTailY, body);
+    canvas.drawLine(tailX, tailY, rightTailX, rightTailY, body);
+    canvas.fillCircle(noseX, noseY, 1, cyberSelectedColor());
 
     if (selected)
     {
-        canvas.drawCircle(x, y, 10, cyberMagentaColor());
+        canvas.drawCircle(x, y, 9, cyberSelectedColor());
+        canvas.drawCircle(x, y, 12, cyberMagentaColor());
     }
 }
 
@@ -946,12 +1377,12 @@ void RadarRenderer::drawCyberpunkSpeedVector(TFT_eSprite &canvas,
 
     const float headingDeg = isfinite(target.headingDeg) ? target.headingDeg : target.bearingDeg;
     const float heading = headingDeg * DEG_TO_RAD;
-    const float noseLength = CyberpunkRadarTheme::aircraftNoseLength * cyberpunkTuning().aircraftScale;
-    const int16_t startX = x + static_cast<int16_t>(sinf(heading) * noseLength);
-    const int16_t startY = y - static_cast<int16_t>(cosf(heading) * noseLength);
+    const float tailLength = CyberpunkRadarTheme::aircraftTailLength * cyberpunkTuning().aircraftScale + 4.0f;
+    const int16_t startX = x - static_cast<int16_t>(sinf(heading) * tailLength);
+    const int16_t startY = y + static_cast<int16_t>(cosf(heading) * tailLength);
     const int lineLength = cyberpunkSpeedVectorLengthPx(target.speedMs);
-    int16_t endX = startX + static_cast<int16_t>(sinf(heading) * lineLength);
-    int16_t endY = startY - static_cast<int16_t>(cosf(heading) * lineLength);
+    int16_t endX = startX - static_cast<int16_t>(sinf(heading) * lineLength);
+    int16_t endY = startY + static_cast<int16_t>(cosf(heading) * lineLength);
     clipCyberpunkPointToInnerRadar(startX, startY, endX, endY);
     drawModernWideLine(canvas, startX, startY, endX, endY, cyberMagentaColor(), cyberpunkTuning().lineWidth);
 }
@@ -960,55 +1391,109 @@ void RadarRenderer::drawCyberpunkAircraftLabel(TFT_eSprite &canvas,
                                                const Aircraft &target,
                                                int16_t x,
                                                int16_t y,
-                                               bool selected)
+                                               bool selected,
+                                               LabelRect *usedLabels,
+                                               uint8_t &usedLabelCount)
 {
     char callsign[16];
     char altitude[16];
+    char speed[16];
     snprintf(callsign, sizeof(callsign), "%s", target.callsign[0] != '\0' ? target.callsign : "UNKNOWN");
     snprintf(altitude, sizeof(altitude), "%.0fm", target.altitudeM);
+    snprintf(speed, sizeof(speed), "%.0fm/s", target.speedMs);
 
     const CyberpunkRadarTuning &tuning = cyberpunkTuning();
-    const bool labelRight = x < CyberpunkRadarTheme::centerX;
+    bool labelRight = x < CyberpunkRadarTheme::centerX;
     const int16_t symbolHalf = static_cast<int16_t>((CyberpunkRadarTheme::aircraftNoseLength +
                                                      CyberpunkRadarTheme::aircraftTailHalfWidth) *
                                                     tuning.aircraftScale);
     const int16_t labelWidth = selected ?
-                               max(canvas.textWidth(callsign, 1), canvas.textWidth(altitude, 1)) :
+                               max(max(canvas.textWidth(callsign, 1), canvas.textWidth(altitude, 1)),
+                                   canvas.textWidth(speed, 1)) :
                                canvas.textWidth(callsign, 1);
-    const int16_t blockHeight = selected ? 19 : 9;
-    int16_t anchorX = labelRight ?
-                      x + symbolHalf + tuning.labelGap + 2 :
-                      x - symbolHalf - tuning.labelGap - 2;
+    const int16_t blockHeight = selected ? 28 : 9;
     int16_t labelY = constrain(y - blockHeight / 2, 14, CyberpunkRadarTheme::size - blockHeight - 14);
+    int16_t anchorX = 0;
+    LabelRect rect = {0, 0, 0, 0};
+    bool reserved = false;
 
-    canvas.drawLine(x,
-                    y,
-                    labelRight ? anchorX - 2 : anchorX + 2,
-                    labelY + 4,
-                    selected ? cyberMagentaColor() : cyberRingDimColor());
+    for (uint8_t attempt = 0; attempt < 5 && !reserved; ++attempt)
+    {
+        labelRight = attempt == 3 ? !labelRight : labelRight;
+        int16_t candidateY = labelY;
+        if (attempt == 1)
+        {
+            candidateY = constrain(labelY - 12, 14, CyberpunkRadarTheme::size - blockHeight - 14);
+        }
+        else if (attempt == 2)
+        {
+            candidateY = constrain(labelY + 12, 14, CyberpunkRadarTheme::size - blockHeight - 14);
+        }
+        else if (attempt == 4)
+        {
+            candidateY = constrain(labelY + 22, 14, CyberpunkRadarTheme::size - blockHeight - 14);
+        }
+
+        anchorX = labelRight ?
+                  x + symbolHalf + tuning.labelGap + 2 :
+                  x - symbolHalf - tuning.labelGap - 2;
+
+        if (labelRight)
+        {
+            anchorX = constrain(anchorX, 10, CyberpunkRadarTheme::size - labelWidth - 12);
+            rect = {static_cast<int16_t>(anchorX - 1), static_cast<int16_t>(candidateY - 1), static_cast<int16_t>(labelWidth + 2), static_cast<int16_t>(blockHeight + 2)};
+        }
+        else
+        {
+            anchorX = constrain(anchorX, labelWidth + 12, CyberpunkRadarTheme::size - 10);
+            rect = {static_cast<int16_t>(anchorX - labelWidth - 1), static_cast<int16_t>(candidateY - 1), static_cast<int16_t>(labelWidth + 2), static_cast<int16_t>(blockHeight + 2)};
+        }
+
+        if (reserveLabelRect(usedLabels, usedLabelCount, rect))
+        {
+            labelY = candidateY;
+            reserved = true;
+        }
+    }
+
+    if (!reserved)
+    {
+        if (!selected)
+        {
+            return;
+        }
+        if (usedLabelCount < kMaxTrackedLabels)
+        {
+            usedLabels[usedLabelCount++] = rect;
+        }
+    }
+
+    if (tuning.showLeaderLines)
+    {
+        canvas.drawLine(x,
+                        y,
+                        labelRight ? rect.x : static_cast<int16_t>(rect.x + rect.w),
+                        static_cast<int16_t>(labelY + 4),
+                        selected ? cyberMagentaColor() : cyberAircraftGlowColor());
+    }
 
     if (labelRight)
     {
-        anchorX = constrain(anchorX, 10, CyberpunkRadarTheme::size - labelWidth - 12);
         canvas.setTextDatum(TL_DATUM);
-        canvas.setTextColor(selected ? cyberSelectedColor() : cyberTextColor(), cyberBackgroundColor());
-        canvas.drawString(callsign, anchorX, labelY, 1);
-        if (selected)
-        {
-            canvas.setTextColor(cyberAltitudeColor(), cyberBackgroundColor());
-            canvas.drawString(altitude, anchorX, labelY + 9, 1);
-        }
-        return;
+    }
+    else
+    {
+        canvas.setTextDatum(TR_DATUM);
     }
 
-    anchorX = constrain(anchorX, labelWidth + 12, CyberpunkRadarTheme::size - 10);
-    canvas.setTextDatum(TR_DATUM);
     canvas.setTextColor(selected ? cyberSelectedColor() : cyberTextColor(), cyberBackgroundColor());
     canvas.drawString(callsign, anchorX, labelY, 1);
     if (selected)
     {
         canvas.setTextColor(cyberAltitudeColor(), cyberBackgroundColor());
         canvas.drawString(altitude, anchorX, labelY + 9, 1);
+        canvas.setTextColor(cyberSelectedColor(), cyberBackgroundColor());
+        canvas.drawString(speed, anchorX, labelY + 18, 1);
     }
 }
 
@@ -1024,15 +1509,23 @@ void RadarRenderer::drawCyberpunkStatusText(TFT_eSprite &canvas,
     }
     else
     {
-        snprintf(status, sizeof(status), "CYBER N=%u", aircraftCount);
+        snprintf(status, sizeof(status), "N=%u", aircraftCount);
+    }
+
+    const bool looksLikeError = strstr(status, "WIFI") != nullptr ||
+                                strstr(status, "AUTH") != nullptr ||
+                                strstr(status, "API") != nullptr ||
+                                strstr(status, "429") != nullptr ||
+                                strstr(status, "ERR") != nullptr ||
+                                strstr(status, "NO ") != nullptr;
+    if (!cyberpunkTuning().showStatusText && !looksLikeError)
+    {
+        return;
     }
 
     char range[16];
     snprintf(range, sizeof(range), "%.0fkm", max(config.maxRangeKm, 1.0f));
 
-    canvas.setTextDatum(TC_DATUM);
-    canvas.setTextColor(cyberTextColor(), cyberBackgroundColor());
-    canvas.drawString("CYBER", CyberpunkRadarTheme::centerX, 18, 1);
     canvas.setTextDatum(BC_DATUM);
     canvas.setTextColor(cyberAltitudeColor(), cyberBackgroundColor());
     canvas.drawString(status, CyberpunkRadarTheme::centerX, 226, 1);
@@ -1074,6 +1567,104 @@ int RadarRenderer::cyberpunkSpeedVectorLengthPx(float speedMs) const
     return constrain(static_cast<int>(rawPx),
                      CyberpunkRadarTheme::speedLineMinPx,
                      CyberpunkRadarTheme::speedLineMaxPx);
+}
+
+bool RadarRenderer::shouldShowAircraftLabel(const Aircraft &target,
+                                            uint8_t index,
+                                            uint8_t selectedIndex,
+                                            uint8_t aircraftCount,
+                                            uint8_t labelShownCount,
+                                            uint8_t maxLabels) const
+{
+    if (!target.valid)
+    {
+        return false;
+    }
+
+    if (index == selectedIndex)
+    {
+        return true;
+    }
+
+    if (labelShownCount >= maxLabels)
+    {
+        return false;
+    }
+
+    if (aircraftCount <= 5)
+    {
+        return true;
+    }
+
+    if (isfinite(target.distanceKm) && target.distanceKm < 12.0f)
+    {
+        return labelShownCount < maxLabels;
+    }
+
+    const uint8_t stride = aircraftCount > 10 ? 3 : 2;
+    return (index % stride) == 0;
+}
+
+bool RadarRenderer::reserveLabelRect(LabelRect *usedLabels,
+                                     uint8_t &usedLabelCount,
+                                     const LabelRect &candidate) const
+{
+    if (usedLabels == nullptr)
+    {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < usedLabelCount; ++i)
+    {
+        if (labelsOverlap(usedLabels[i], candidate))
+        {
+            return false;
+        }
+    }
+
+    if (usedLabelCount >= kMaxTrackedLabels)
+    {
+        return false;
+    }
+
+    usedLabels[usedLabelCount++] = candidate;
+    return true;
+}
+
+bool RadarRenderer::labelsOverlap(const LabelRect &a, const LabelRect &b) const
+{
+    constexpr int16_t padding = 2;
+    return a.x < b.x + b.w + padding &&
+           a.x + a.w + padding > b.x &&
+           a.y < b.y + b.h + padding &&
+           a.y + a.h + padding > b.y;
+}
+
+void RadarRenderer::rotateCyberpunkAircraftPoint(float localX,
+                                                 float localY,
+                                                 float headingDeg,
+                                                 float scale,
+                                                 int16_t originX,
+                                                 int16_t originY,
+                                                 int16_t &screenX,
+                                                 int16_t &screenY) const
+{
+    const float radians = headingDeg * DEG_TO_RAD;
+    const float c = cosf(radians);
+    const float s = sinf(radians);
+    const float x = localX * scale;
+    const float y = localY * scale;
+    screenX = originX + static_cast<int16_t>(roundf(x * c - y * s));
+    screenY = originY + static_cast<int16_t>(roundf(x * s + y * c));
+}
+
+bool RadarRenderer::cyberpunkPointInsideOuter(int16_t x, int16_t y) const
+{
+    const int16_t dx = x - CyberpunkRadarTheme::centerX;
+    const int16_t dy = y - CyberpunkRadarTheme::centerY;
+    const int16_t radius = cyberpunkTuning().outerRadius - 2;
+    return static_cast<int32_t>(dx) * dx + static_cast<int32_t>(dy) * dy <=
+           static_cast<int32_t>(radius) * radius;
 }
 
 void RadarRenderer::clipCyberpunkPointToInnerRadar(int16_t x0,

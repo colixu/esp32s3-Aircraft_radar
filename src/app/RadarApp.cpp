@@ -377,9 +377,26 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  set modern.globalBrightness VALUE");
     DebugLog::println("  set modern.outerRadius VALUE");
     DebugLog::println("  set cyber.bg R G B");
+    DebugLog::println("  set cyber.outer|ring|tick|magenta R G B");
+    DebugLog::println("  set cyber.aircraft|aircraftGlow R G B");
     DebugLog::println("  set cyber.sweep R G B");
     DebugLog::println("  set cyber.globalBrightness VALUE");
+    DebugLog::println("  set cyber.ring|text|aircraft|sweepBrightness VALUE");
     DebugLog::println("  set cyber.outerRadius VALUE");
+    DebugLog::println("  set cyber.innerRadarRadius|ringCount|lineWidth VALUE");
+    DebugLog::println("  set cyber.aircraftScale|vectorScale VALUE");
+    DebugLog::println("  set cyber.sweepWidth|sweepTrailStrength VALUE");
+    DebugLog::println("  set cyber.mapBrightness VALUE");
+    DebugLog::println("  set cyber.mapDensity VALUE");
+    DebugLog::println("  set cyber.radialGridBrightness VALUE");
+    DebugLog::println("  set cyber.outerTickStepDeg VALUE");
+    DebugLog::println("  set cyber.bearingLabelRadiusOffset VALUE");
+    DebugLog::println("  set cyber.cardinalRadiusOffset VALUE");
+    DebugLog::println("  set cyber.outerGlowBrightness VALUE");
+    DebugLog::println("  set cyber.outerGlowWidth VALUE");
+    DebugLog::println("  set modern|cyber.showStatusText 0/1");
+    DebugLog::println("  set modern|cyber.showLeaderLines 0/1");
+    DebugLog::println("  set modern|cyber.maxLabels VALUE");
     DebugLog::println("  r: switch radar range");
     DebugLog::println("  g: toggle ground traffic");
     DebugLog::println("  o: cycle outside-schedule display");
@@ -678,6 +695,10 @@ bool RadarApp::applyUiTuningColor(const char *key, const UiTuningCommand &comman
     {
         color = &uiTuning_.cyberpunk.sweep;
     }
+    else if (keyMatches(key, "cyber.map"))
+    {
+        color = &uiTuning_.cyberpunk.map;
+    }
 
     if (color == nullptr)
     {
@@ -751,6 +772,21 @@ bool RadarApp::applyUiTuningValue(const char *key, const UiTuningCommand &comman
     if (keyMatches(key, "modern.labelGap", "labelGap"))
     {
         uiTuning_.modern.labelGap = static_cast<int8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "modern.showStatusText"))
+    {
+        uiTuning_.modern.showStatusText = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "modern.showLeaderLines"))
+    {
+        uiTuning_.modern.showLeaderLines = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "modern.maxLabels"))
+    {
+        uiTuning_.modern.maxLabels = static_cast<uint8_t>(value);
         return true;
     }
     if (keyMatches(key, "cyber.globalBrightness"))
@@ -836,6 +872,101 @@ bool RadarApp::applyUiTuningValue(const char *key, const UiTuningCommand &comman
     if (keyMatches(key, "cyber.labelGap"))
     {
         uiTuning_.cyberpunk.labelGap = static_cast<int8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.mapBrightness"))
+    {
+        uiTuning_.cyberpunk.mapBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.mapDensity"))
+    {
+        uiTuning_.cyberpunk.mapDensity = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.bearingLabelRadiusOffset"))
+    {
+        uiTuning_.cyberpunk.bearingLabelRadiusOffset = static_cast<int16_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.cardinalRadiusOffset"))
+    {
+        uiTuning_.cyberpunk.cardinalRadiusOffset = static_cast<int16_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.outerGlowBrightness"))
+    {
+        uiTuning_.cyberpunk.outerGlowBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.outerGlowWidth"))
+    {
+        uiTuning_.cyberpunk.outerGlowWidth = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.mapEnabled"))
+    {
+        uiTuning_.cyberpunk.mapEnabled = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "cyber.radialGridEnabled"))
+    {
+        uiTuning_.cyberpunk.radialGridEnabled = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "cyber.radialGridStepDeg"))
+    {
+        uiTuning_.cyberpunk.radialGridStepDeg = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.radialGridBrightness"))
+    {
+        uiTuning_.cyberpunk.radialGridBrightness = value;
+        return true;
+    }
+    if (keyMatches(key, "cyber.bearingLabelsEnabled"))
+    {
+        uiTuning_.cyberpunk.bearingLabelsEnabled = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "cyber.bearingLabelStepDeg"))
+    {
+        uiTuning_.cyberpunk.bearingLabelStepDeg = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.rangeLabelsEnabled"))
+    {
+        uiTuning_.cyberpunk.rangeLabelsEnabled = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "cyber.outerTickStepDeg"))
+    {
+        uiTuning_.cyberpunk.outerTickStepDeg = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.mediumTickStepDeg"))
+    {
+        uiTuning_.cyberpunk.mediumTickStepDeg = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.majorTickStepDeg"))
+    {
+        uiTuning_.cyberpunk.majorTickStepDeg = static_cast<uint8_t>(value);
+        return true;
+    }
+    if (keyMatches(key, "cyber.showStatusText"))
+    {
+        uiTuning_.cyberpunk.showStatusText = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "cyber.showLeaderLines"))
+    {
+        uiTuning_.cyberpunk.showLeaderLines = value >= 0.5f;
+        return true;
+    }
+    if (keyMatches(key, "cyber.maxLabels"))
+    {
+        uiTuning_.cyberpunk.maxLabels = static_cast<uint8_t>(value);
         return true;
     }
 

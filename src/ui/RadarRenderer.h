@@ -62,6 +62,15 @@ private:
     static constexpr int16_t kRadarRadius = 118;
     static constexpr uint8_t kScanTrailCount = 24;
     static constexpr uint8_t kScanTrailProfileCount = 32;
+    static constexpr uint8_t kMaxTrackedLabels = 8;
+
+    struct LabelRect
+    {
+        int16_t x;
+        int16_t y;
+        int16_t w;
+        int16_t h;
+    };
 
     TFT_eSPI &tft_;
     TFT_eSprite frame_;
@@ -116,6 +125,8 @@ private:
     uint16_t cyberAltitudeColor();
     uint16_t cyberSelectedColor();
     uint16_t cyberSweepColor();
+    uint16_t cyberMapColor();
+    uint16_t cyberRadialGridColor();
 
     void radarToScreen(float bearingDeg,
                        float distanceKm,
@@ -166,6 +177,7 @@ private:
     void drawModernReferenceAircraft(TFT_eSprite &canvas,
                                      const Aircraft *aircraft,
                                      uint8_t aircraftCount,
+                                     uint8_t selectedAircraftIndex,
                                      const AppConfig &config);
     void drawModernReferenceAircraftSymbol(TFT_eSprite &canvas,
                                            const Aircraft &target,
@@ -178,7 +190,10 @@ private:
     void drawModernReferenceAircraftTag(TFT_eSprite &canvas,
                                         const Aircraft &target,
                                         int16_t x,
-                                        int16_t y);
+                                        int16_t y,
+                                        bool selected,
+                                        LabelRect *usedLabels,
+                                        uint8_t &usedLabelCount);
     void drawModernReferenceBeyondDot(TFT_eSprite &canvas, const Aircraft &target);
     bool modernReferenceToScreen(const Aircraft &target,
                                  const AppConfig &config,
@@ -200,11 +215,26 @@ private:
                                    uint8_t selectedAircraftIndex,
                                    const AppConfig &config,
                                    const char *statusText);
+    void drawCyberpunkStaticBackground(TFT_eSprite &canvas);
+    void drawCyberpunkStaticCardinals(TFT_eSprite &canvas);
     void drawCyberpunkBackground(TFT_eSprite &canvas);
+    void drawCyberpunkMapTexture(TFT_eSprite &canvas);
+    void drawCyberpunkDottedMapPath(TFT_eSprite &canvas,
+                                    const int16_t points[][2],
+                                    uint8_t pointCount,
+                                    uint16_t color,
+                                    uint8_t baseSpacing = 2);
+    void drawCyberpunkMapDots(TFT_eSprite &canvas,
+                              const int16_t points[][2],
+                              uint8_t pointCount,
+                              uint16_t color);
+    void drawCyberpunkRadialGrid(TFT_eSprite &canvas);
     void drawCyberpunkRings(TFT_eSprite &canvas);
-    void drawCyberpunkOuterTicks(TFT_eSprite &canvas);
+    void drawCyberpunkOuterScale(TFT_eSprite &canvas);
+    void drawCyberpunkBearingLabels(TFT_eSprite &canvas);
     void drawCyberpunkCardinals(TFT_eSprite &canvas);
     void drawCyberpunkCrosshair(TFT_eSprite &canvas);
+    void drawCyberpunkRangeLabels(TFT_eSprite &canvas, const AppConfig &config);
     void drawCyberpunkSweep(TFT_eSprite &canvas);
     void drawCyberpunkCenter(TFT_eSprite &canvas);
     void drawCyberpunkAircraftTargets(TFT_eSprite &canvas,
@@ -217,6 +247,11 @@ private:
                                      int16_t x,
                                      int16_t y,
                                      bool selected);
+    void drawCyberpunkAircraftSilhouette(TFT_eSprite &canvas,
+                                         int16_t x,
+                                         int16_t y,
+                                         float headingDeg,
+                                         bool selected);
     void drawCyberpunkSpeedVector(TFT_eSprite &canvas,
                                   const Aircraft &target,
                                   int16_t x,
@@ -225,7 +260,9 @@ private:
                                     const Aircraft &target,
                                     int16_t x,
                                     int16_t y,
-                                    bool selected);
+                                    bool selected,
+                                    LabelRect *usedLabels,
+                                    uint8_t &usedLabelCount);
     void drawCyberpunkStatusText(TFT_eSprite &canvas,
                                  const char *statusText,
                                  uint8_t aircraftCount,
@@ -236,6 +273,25 @@ private:
                            int16_t &y,
                            bool &insideRadar) const;
     int cyberpunkSpeedVectorLengthPx(float speedMs) const;
+    bool shouldShowAircraftLabel(const Aircraft &target,
+                                 uint8_t index,
+                                 uint8_t selectedIndex,
+                                 uint8_t aircraftCount,
+                                 uint8_t labelShownCount,
+                                 uint8_t maxLabels) const;
+    bool reserveLabelRect(LabelRect *usedLabels,
+                          uint8_t &usedLabelCount,
+                          const LabelRect &candidate) const;
+    bool labelsOverlap(const LabelRect &a, const LabelRect &b) const;
+    void rotateCyberpunkAircraftPoint(float localX,
+                                      float localY,
+                                      float headingDeg,
+                                      float scale,
+                                      int16_t originX,
+                                      int16_t originY,
+                                      int16_t &screenX,
+                                      int16_t &screenY) const;
+    bool cyberpunkPointInsideOuter(int16_t x, int16_t y) const;
     void clipCyberpunkPointToInnerRadar(int16_t x0,
                                         int16_t y0,
                                         int16_t &x1,

@@ -42,10 +42,13 @@ void loadDefaultRadarUiTuning(RadarUiTuning &tuning)
     tuning.modern.aircraftScale = 1.0f;
     tuning.modern.vectorScale = 1.0f;
     tuning.modern.labelGap = 0;
+    tuning.modern.showStatusText = false;
+    tuning.modern.showLeaderLines = true;
+    tuning.modern.maxLabels = 6;
 
     tuning.cyberpunk.background = {1, 4, 12};
     tuning.cyberpunk.backgroundNoise = {0, 40, 80};
-    tuning.cyberpunk.outerRing = {0, 220, 255};
+    tuning.cyberpunk.outerRing = {0, 160, 210};
     tuning.cyberpunk.ring = {0, 120, 200};
     tuning.cyberpunk.ringDim = {0, 45, 90};
     tuning.cyberpunk.crosshair = {0, 210, 255};
@@ -57,12 +60,15 @@ void loadDefaultRadarUiTuning(RadarUiTuning &tuning)
     tuning.cyberpunk.altitudeText = {80, 210, 255};
     tuning.cyberpunk.selected = {255, 255, 255};
     tuning.cyberpunk.sweep = {0, 200, 255};
+    tuning.cyberpunk.map = {0, 120, 210};
 
     tuning.cyberpunk.globalBrightness = 1.0f;
     tuning.cyberpunk.ringBrightness = 1.0f;
     tuning.cyberpunk.textBrightness = 1.0f;
     tuning.cyberpunk.aircraftBrightness = 1.0f;
     tuning.cyberpunk.sweepBrightness = 1.0f;
+    tuning.cyberpunk.mapBrightness = 0.75f;
+    tuning.cyberpunk.radialGridBrightness = 0.35f;
 
     tuning.cyberpunk.outerRadius = 114;
     tuning.cyberpunk.innerRadarRadius = 102;
@@ -75,8 +81,27 @@ void loadDefaultRadarUiTuning(RadarUiTuning &tuning)
     tuning.cyberpunk.aircraftScale = 1.0f;
     tuning.cyberpunk.vectorScale = 1.0f;
     tuning.cyberpunk.sweepWidth = 3.0f;
-    tuning.cyberpunk.sweepTrailStrength = 0.75f;
+    tuning.cyberpunk.sweepTrailStrength = 0.95f;
+    tuning.cyberpunk.mapDensity = 1.0f;
+    tuning.cyberpunk.outerGlowBrightness = 0.45f;
     tuning.cyberpunk.labelGap = 3;
+    tuning.cyberpunk.bearingLabelRadiusOffset = -5;
+    tuning.cyberpunk.cardinalRadiusOffset = -8;
+
+    tuning.cyberpunk.mapEnabled = true;
+    tuning.cyberpunk.radialGridEnabled = true;
+    tuning.cyberpunk.bearingLabelsEnabled = true;
+    tuning.cyberpunk.rangeLabelsEnabled = true;
+    tuning.cyberpunk.showStatusText = false;
+    tuning.cyberpunk.showLeaderLines = true;
+
+    tuning.cyberpunk.radialGridStepDeg = 10;
+    tuning.cyberpunk.bearingLabelStepDeg = 30;
+    tuning.cyberpunk.outerTickStepDeg = 5;
+    tuning.cyberpunk.mediumTickStepDeg = 10;
+    tuning.cyberpunk.majorTickStepDeg = 30;
+    tuning.cyberpunk.outerGlowWidth = 1;
+    tuning.cyberpunk.maxLabels = 6;
 
     sanitizeRadarUiTuning(tuning);
 }
@@ -96,12 +121,15 @@ void sanitizeRadarUiTuning(RadarUiTuning &tuning)
     tuning.modern.aircraftScale = clampValue(tuning.modern.aircraftScale, 0.4f, 2.0f);
     tuning.modern.vectorScale = clampValue(tuning.modern.vectorScale, 0.0f, 3.0f);
     tuning.modern.labelGap = clampValue<int8_t>(tuning.modern.labelGap, -8, 16);
+    tuning.modern.maxLabels = clampValue<uint8_t>(tuning.modern.maxLabels, 1, 8);
 
     tuning.cyberpunk.globalBrightness = clampValue(tuning.cyberpunk.globalBrightness, 0.0f, 2.0f);
     tuning.cyberpunk.ringBrightness = clampValue(tuning.cyberpunk.ringBrightness, 0.0f, 2.0f);
     tuning.cyberpunk.textBrightness = clampValue(tuning.cyberpunk.textBrightness, 0.0f, 2.0f);
     tuning.cyberpunk.aircraftBrightness = clampValue(tuning.cyberpunk.aircraftBrightness, 0.0f, 2.0f);
     tuning.cyberpunk.sweepBrightness = clampValue(tuning.cyberpunk.sweepBrightness, 0.0f, 2.0f);
+    tuning.cyberpunk.mapBrightness = clampValue(tuning.cyberpunk.mapBrightness, 0.0f, 2.0f);
+    tuning.cyberpunk.radialGridBrightness = clampValue(tuning.cyberpunk.radialGridBrightness, 0.0f, 2.0f);
 
     tuning.cyberpunk.outerRadius = clampValue<uint8_t>(tuning.cyberpunk.outerRadius, 80, 118);
     tuning.cyberpunk.innerRadarRadius = clampValue<uint8_t>(tuning.cyberpunk.innerRadarRadius, 60, tuning.cyberpunk.outerRadius);
@@ -115,7 +143,19 @@ void sanitizeRadarUiTuning(RadarUiTuning &tuning)
     tuning.cyberpunk.vectorScale = clampValue(tuning.cyberpunk.vectorScale, 0.0f, 3.0f);
     tuning.cyberpunk.sweepWidth = clampValue(tuning.cyberpunk.sweepWidth, 1.0f, 8.0f);
     tuning.cyberpunk.sweepTrailStrength = clampValue(tuning.cyberpunk.sweepTrailStrength, 0.0f, 1.5f);
+    tuning.cyberpunk.mapDensity = clampValue(tuning.cyberpunk.mapDensity, 0.2f, 2.0f);
+    tuning.cyberpunk.outerGlowBrightness = clampValue(tuning.cyberpunk.outerGlowBrightness, 0.0f, 1.5f);
     tuning.cyberpunk.labelGap = clampValue<int8_t>(tuning.cyberpunk.labelGap, -8, 16);
+    tuning.cyberpunk.bearingLabelRadiusOffset = clampValue<int16_t>(tuning.cyberpunk.bearingLabelRadiusOffset, -20, 5);
+    tuning.cyberpunk.cardinalRadiusOffset = clampValue<int16_t>(tuning.cyberpunk.cardinalRadiusOffset, -20, 5);
+    tuning.cyberpunk.maxLabels = clampValue<uint8_t>(tuning.cyberpunk.maxLabels, 1, 8);
+
+    tuning.cyberpunk.radialGridStepDeg = clampValue<uint8_t>(tuning.cyberpunk.radialGridStepDeg, 5, 45);
+    tuning.cyberpunk.bearingLabelStepDeg = clampValue<uint8_t>(tuning.cyberpunk.bearingLabelStepDeg, 30, 90);
+    tuning.cyberpunk.outerTickStepDeg = clampValue<uint8_t>(tuning.cyberpunk.outerTickStepDeg, 1, 30);
+    tuning.cyberpunk.mediumTickStepDeg = clampValue<uint8_t>(tuning.cyberpunk.mediumTickStepDeg, 1, 45);
+    tuning.cyberpunk.majorTickStepDeg = clampValue<uint8_t>(tuning.cyberpunk.majorTickStepDeg, 1, 90);
+    tuning.cyberpunk.outerGlowWidth = clampValue<uint8_t>(tuning.cyberpunk.outerGlowWidth, 0, 6);
 }
 
 void printRadarUiTuning(const RadarUiTuning &tuning)
@@ -140,9 +180,13 @@ void printRadarUiTuning(const RadarUiTuning &tuning)
     DebugLog::printf("  aircraftScale = %.2f\r\n", modern.aircraftScale);
     DebugLog::printf("  vectorScale = %.2f\r\n", modern.vectorScale);
     DebugLog::printf("  labelGap = %d\r\n", modern.labelGap);
+    DebugLog::printf("  showStatusText = %u\r\n", modern.showStatusText ? 1 : 0);
+    DebugLog::printf("  showLeaderLines = %u\r\n", modern.showLeaderLines ? 1 : 0);
+    DebugLog::printf("  maxLabels = %u\r\n", modern.maxLabels);
 
     const CyberpunkRadarTuning &cyber = tuning.cyberpunk;
     DebugLog::println("CyberpunkRadarTuning:");
+    DebugLog::println("  Static background mode: background-layer tuning is ignored.");
     DebugLog::printf("  background = {%u, %u, %u}\r\n", cyber.background.r, cyber.background.g, cyber.background.b);
     DebugLog::printf("  backgroundNoise = {%u, %u, %u}\r\n", cyber.backgroundNoise.r, cyber.backgroundNoise.g, cyber.backgroundNoise.b);
     DebugLog::printf("  outerRing = {%u, %u, %u}\r\n", cyber.outerRing.r, cyber.outerRing.g, cyber.outerRing.b);
@@ -157,11 +201,14 @@ void printRadarUiTuning(const RadarUiTuning &tuning)
     DebugLog::printf("  altitudeText = {%u, %u, %u}\r\n", cyber.altitudeText.r, cyber.altitudeText.g, cyber.altitudeText.b);
     DebugLog::printf("  selected = {%u, %u, %u}\r\n", cyber.selected.r, cyber.selected.g, cyber.selected.b);
     DebugLog::printf("  sweep = {%u, %u, %u}\r\n", cyber.sweep.r, cyber.sweep.g, cyber.sweep.b);
+    DebugLog::printf("  map = {%u, %u, %u}\r\n", cyber.map.r, cyber.map.g, cyber.map.b);
     DebugLog::printf("  globalBrightness = %.2f\r\n", cyber.globalBrightness);
     DebugLog::printf("  ringBrightness = %.2f\r\n", cyber.ringBrightness);
     DebugLog::printf("  textBrightness = %.2f\r\n", cyber.textBrightness);
     DebugLog::printf("  aircraftBrightness = %.2f\r\n", cyber.aircraftBrightness);
     DebugLog::printf("  sweepBrightness = %.2f\r\n", cyber.sweepBrightness);
+    DebugLog::printf("  mapBrightness = %.2f\r\n", cyber.mapBrightness);
+    DebugLog::printf("  radialGridBrightness = %.2f\r\n", cyber.radialGridBrightness);
     DebugLog::printf("  outerRadius = %u\r\n", cyber.outerRadius);
     DebugLog::printf("  innerRadarRadius = %u\r\n", cyber.innerRadarRadius);
     DebugLog::printf("  ringCount = %u\r\n", cyber.ringCount);
@@ -173,5 +220,22 @@ void printRadarUiTuning(const RadarUiTuning &tuning)
     DebugLog::printf("  vectorScale = %.2f\r\n", cyber.vectorScale);
     DebugLog::printf("  sweepWidth = %.2f\r\n", cyber.sweepWidth);
     DebugLog::printf("  sweepTrailStrength = %.2f\r\n", cyber.sweepTrailStrength);
+    DebugLog::printf("  mapDensity = %.2f\r\n", cyber.mapDensity);
+    DebugLog::printf("  outerGlowBrightness = %.2f\r\n", cyber.outerGlowBrightness);
     DebugLog::printf("  labelGap = %d\r\n", cyber.labelGap);
+    DebugLog::printf("  bearingLabelRadiusOffset = %d\r\n", cyber.bearingLabelRadiusOffset);
+    DebugLog::printf("  cardinalRadiusOffset = %d\r\n", cyber.cardinalRadiusOffset);
+    DebugLog::printf("  mapEnabled = %u\r\n", cyber.mapEnabled ? 1 : 0);
+    DebugLog::printf("  radialGridEnabled = %u\r\n", cyber.radialGridEnabled ? 1 : 0);
+    DebugLog::printf("  bearingLabelsEnabled = %u\r\n", cyber.bearingLabelsEnabled ? 1 : 0);
+    DebugLog::printf("  rangeLabelsEnabled = %u\r\n", cyber.rangeLabelsEnabled ? 1 : 0);
+    DebugLog::printf("  showStatusText = %u\r\n", cyber.showStatusText ? 1 : 0);
+    DebugLog::printf("  showLeaderLines = %u\r\n", cyber.showLeaderLines ? 1 : 0);
+    DebugLog::printf("  radialGridStepDeg = %u\r\n", cyber.radialGridStepDeg);
+    DebugLog::printf("  bearingLabelStepDeg = %u\r\n", cyber.bearingLabelStepDeg);
+    DebugLog::printf("  outerTickStepDeg = %u\r\n", cyber.outerTickStepDeg);
+    DebugLog::printf("  mediumTickStepDeg = %u\r\n", cyber.mediumTickStepDeg);
+    DebugLog::printf("  majorTickStepDeg = %u\r\n", cyber.majorTickStepDeg);
+    DebugLog::printf("  outerGlowWidth = %u\r\n", cyber.outerGlowWidth);
+    DebugLog::printf("  maxLabels = %u\r\n", cyber.maxLabels);
 }
