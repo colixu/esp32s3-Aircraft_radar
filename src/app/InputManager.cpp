@@ -302,10 +302,10 @@ bool InputManager::parseUiTuningCommand(char *line)
     }
 
 #if !ENABLE_UI_LAB
-    DebugLog::println("set ignored: UI Lab is disabled in this build.");
+    DebugLog::println("UI Lab is disabled in this build.");
     return true;
 #elif !ENABLE_UI_LAB_ADVANCED_TUNING
-    DebugLog::println("set ignored: advanced UI tuning is disabled in this build.");
+    DebugLog::println("Advanced UI tuning is disabled in this build.");
     return true;
 #else
     token = strtok(nullptr, " \t");
