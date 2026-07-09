@@ -8,6 +8,8 @@
 
 namespace
 {
+    bool serialDebugDisabledNotified = false;
+
     bool isIgnoredSerialChar(char command)
     {
         return command == '\r' || command == '\n' || command == ' ' || command == '\t';
@@ -46,6 +48,17 @@ namespace
     void printVirtualButtonHelp()
     {
         DebugLog::println("Unknown button command. Use: btn up short|long|double or btn down short|long|double");
+    }
+
+    void printSerialDebugDisabledOnce()
+    {
+        if (serialDebugDisabledNotified)
+        {
+            return;
+        }
+
+        serialDebugDisabledNotified = true;
+        DebugLog::println("Serial debug commands disabled. Use virtual button commands.");
     }
 }
 
@@ -182,6 +195,11 @@ void InputManager::handleSerialCommand(char command)
         return;
     }
 
+#if !ENABLE_SERIAL_DEBUG_COMMANDS
+    (void)command;
+    printSerialDebugDisabledOnce();
+    return;
+#else
     switch (command)
     {
         case 'h':
@@ -323,6 +341,7 @@ void InputManager::handleSerialCommand(char command)
             DebugLog::printf("Unknown serial command '%c'. Press h for help.\r\n", command);
             break;
     }
+#endif
 }
 
 void InputManager::handleSerialLine()
@@ -357,6 +376,19 @@ bool InputManager::parseVirtualButtonCommand(char *line)
         return false;
     }
 
+#if !ENABLE_SERIAL_VIRTUAL_BUTTONS
+    if (equalsIgnoreCase(token, "btn") ||
+        equalsIgnoreCase(token, "bu") ||
+        equalsIgnoreCase(token, "bd"))
+    {
+        DebugLog::println("Virtual button commands are disabled in this build.");
+        return true;
+    }
+
+    strncpy(line, original, kLineBufferSize - 1);
+    line[kLineBufferSize - 1] = '\0';
+    return false;
+#else
     bool up = false;
     bool down = false;
     char *action = nullptr;
@@ -430,6 +462,7 @@ bool InputManager::parseVirtualButtonCommand(char *line)
     pushEvent(event);
     DebugLog::printf("Virtual button: %s %s\r\n", up ? "up" : "down", action);
     return true;
+#endif
 }
 
 bool InputManager::parseUiTuningCommand(char *line)

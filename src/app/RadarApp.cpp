@@ -12,6 +12,8 @@ namespace
     constexpr uint32_t kScheduleCheckIntervalMs = 5000;
     constexpr uint32_t kSystemStatusLogIntervalMs = 60000;
     constexpr uint32_t kLocalMenuTimeoutMs = 30000;
+    constexpr uint32_t kLocalMenuOpenLongGuardMs = 8000;
+    constexpr uint32_t kLocalMenuRefreshMs = 500;
     constexpr uint8_t kLocalMenuItemCount = 7;
     constexpr uint8_t kBrightnessLevelCount = 4;
 
@@ -567,7 +569,9 @@ void RadarApp::openLocalMenu()
     localMenuIndex_ = 0;
     localMenuBrightnessIndex_ = brightnessIndexFromValue(settings_.display.brightness);
     localMenuIdleDisplayMode_ = settings_.schedule.idleDisplayMode;
+    localMenuOpenedMs_ = millis();
     localMenuLastInputMs_ = millis();
+    localMenuLastRenderMs_ = 0;
     DebugLog::println("Local menu opened.");
     renderLocalMenu();
 }
@@ -580,7 +584,9 @@ void RadarApp::closeLocalMenu(bool restoreDisplay)
     }
 
     localMenuPage_ = LocalMenuPage::Closed;
+    localMenuOpenedMs_ = 0;
     localMenuLastInputMs_ = 0;
+    localMenuLastRenderMs_ = 0;
     DebugLog::println("Local menu closed.");
 
     if (restoreDisplay)
@@ -591,19 +597,36 @@ void RadarApp::closeLocalMenu(bool restoreDisplay)
 
 void RadarApp::updateLocalMenu(uint32_t now)
 {
-    if (localMenuLastInputMs_ != 0 && now - localMenuLastInputMs_ >= kLocalMenuTimeoutMs)
+    const uint32_t menuNow = millis();
+    (void)now;
+
+    if (localMenuLastInputMs_ != 0 && menuNow - localMenuLastInputMs_ >= kLocalMenuTimeoutMs)
     {
         DebugLog::println("Local menu timeout.");
         closeLocalMenu(true);
+        return;
+    }
+
+    if (localMenuLastRenderMs_ == 0 || menuNow - localMenuLastRenderMs_ >= kLocalMenuRefreshMs)
+    {
+        renderLocalMenu();
     }
 }
 
 void RadarApp::handleLocalMenuButtonEvent(InputEvent event)
 {
-    localMenuLastInputMs_ = millis();
+    const uint32_t now = millis();
+    localMenuLastInputMs_ = now;
 
     if (event == InputEvent::KeyUpLong || event == InputEvent::KeyDownLong)
     {
+        if (localMenuOpenedMs_ != 0 && now - localMenuOpenedMs_ < kLocalMenuOpenLongGuardMs)
+        {
+            DebugLog::println("Local menu: ignored repeated opening long press.");
+            renderLocalMenu();
+            return;
+        }
+
         if (localMenuPage_ == LocalMenuPage::ConfirmReboot ||
             localMenuPage_ == LocalMenuPage::ConfirmApSetup ||
             localMenuPage_ == LocalMenuPage::BrightnessAdjust ||
@@ -798,6 +821,7 @@ void RadarApp::renderLocalMenu()
     }
 
     screenSleeping_ = false;
+    localMenuLastRenderMs_ = millis();
     renderLocalMenuPage();
 }
 
@@ -932,7 +956,25 @@ const char *RadarApp::idleDisplayMenuName(ScheduleIdleDisplayMode mode) const
 
 void RadarApp::printSerialHelp()
 {
-    DebugLog::println("Serial commands:");
+    DebugLog::println("Serial input: virtual buttons only");
+#if ENABLE_SERIAL_VIRTUAL_BUTTONS
+    DebugLog::println("  btn up short      - simulate KEY_UP short press");
+    DebugLog::println("  btn up long       - simulate KEY_UP long press");
+    DebugLog::println("  btn up double     - simulate KEY_UP double click");
+    DebugLog::println("  btn down short    - simulate KEY_DOWN short press");
+    DebugLog::println("  btn down long     - simulate KEY_DOWN long press");
+    DebugLog::println("  btn down double   - simulate KEY_DOWN double click");
+    DebugLog::println("  bu short|long|double");
+    DebugLog::println("  bd short|long|double");
+#else
+    DebugLog::println("  virtual button commands disabled (ENABLE_SERIAL_VIRTUAL_BUTTONS=0)");
+#endif
+
+#if !ENABLE_SERIAL_DEBUG_COMMANDS
+    DebugLog::println("Debug serial commands are disabled in this build.");
+    return;
+#else
+    DebugLog::println("Debug serial commands:");
     DebugLog::println("  h: help");
     DebugLog::println("  p: print UserSettings");
     DebugLog::println("  c: enter setup portal");
@@ -940,13 +982,6 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  q: toggle setup QR/details");
     DebugLog::println("  w: show STA settings URL QR");
     DebugLog::println("  u: switch UI theme");
-    DebugLog::println("Virtual buttons:");
-    DebugLog::println("  btn up short      - simulate KEY_UP short press");
-    DebugLog::println("  btn up long       - simulate KEY_UP long press");
-    DebugLog::println("  btn up double     - simulate KEY_UP double click");
-    DebugLog::println("  btn down short    - simulate KEY_DOWN short press");
-    DebugLog::println("  btn down long     - simulate KEY_DOWN long press");
-    DebugLog::println("  btn down double   - simulate KEY_DOWN double click");
 #if ENABLE_UI_LAB
     DebugLog::println("UI Lab:");
     DebugLog::println("  y: toggle UI Lab");
@@ -997,6 +1032,7 @@ void RadarApp::printSerialHelp()
     DebugLog::println("  A: clear OpenSky token");
     DebugLog::println("  d: reset settings to default");
     DebugLog::println("  b: reboot device");
+#endif
 }
 
 void RadarApp::toggleUiLab()
@@ -1736,6 +1772,11 @@ bool RadarApp::hasActiveOverlay() const
 
 void RadarApp::renderSettingsDisplay(const char *statusText)
 {
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        return;
+    }
+
     screenSleeping_ = false;
     renderer_.renderSettingsFrame(configPortal_.apSsid(),
                                   configPortal_.apPassword(),
@@ -2146,6 +2187,11 @@ void RadarApp::renderRealRadarSystemStatus()
         return;
     }
 
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        return;
+    }
+
     screenSleeping_ = false;
 
     if (!wifi_.isConnected())
@@ -2176,6 +2222,11 @@ void RadarApp::renderPausedIdleFrame(bool force)
         return;
     }
 
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        return;
+    }
+
     if (hasActiveOverlay())
     {
         if (staSettingsOverlayVisible_)
@@ -2186,6 +2237,14 @@ void RadarApp::renderPausedIdleFrame(bool force)
     }
 
     timeManager_.update();
+
+    if (settings_.schedule.enabled && !timeManager_.isTimeSynced())
+    {
+        screenSleeping_ = false;
+        renderer_.renderSystemStatusFrame("TIME SYNC", "Waiting for NTP", "");
+        lastIdleDisplayRenderMs_ = millis();
+        return;
+    }
 
     char nextStart[8];
     formatMinutesOfDay(computeNextScheduleStartMinutes(settings_.schedule,
@@ -2212,7 +2271,6 @@ void RadarApp::renderPausedIdleFrame(bool force)
             {
                 renderer_.renderBlankFrame();
                 lastIdleDisplayRenderMs_ = millis();
-                screenSleeping_ = true;
             }
             break;
 
@@ -2435,6 +2493,11 @@ void RadarApp::updateSelectedAircraftForList(const Aircraft *aircraft, uint8_t a
 
 void RadarApp::renderFrame()
 {
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        return;
+    }
+
     screenSleeping_ = false;
     const AppConfig renderConfig = runtimeRenderConfig();
     renderer_.renderRadarFrame(dataProvider_.aircraft(),
@@ -2446,6 +2509,11 @@ void RadarApp::renderFrame()
 
 void RadarApp::renderRealRadarFrame()
 {
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        return;
+    }
+
     screenSleeping_ = false;
     const AppConfig renderConfig = runtimeRenderConfig();
     renderer_.renderRadarFrame(realAircraft_,
@@ -2458,6 +2526,11 @@ void RadarApp::renderRealRadarFrame()
 
 void RadarApp::renderApiTestScreen()
 {
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        return;
+    }
+
     screenSleeping_ = false;
     apiTestView_.render(wifi_, openSky_);
 }

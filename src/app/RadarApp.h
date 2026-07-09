@@ -90,7 +90,9 @@ private:
     uint8_t localMenuIndex_ = 0;
     uint8_t localMenuBrightnessIndex_ = 0;
     ScheduleIdleDisplayMode localMenuIdleDisplayMode_ = ScheduleIdleDisplayMode::PausedStatus;
+    uint32_t localMenuOpenedMs_ = 0;
     uint32_t localMenuLastInputMs_ = 0;
+    uint32_t localMenuLastRenderMs_ = 0;
 
     uint8_t selectedAircraftIndex_ = 0;
     uint32_t lastFrameMs_ = 0;
