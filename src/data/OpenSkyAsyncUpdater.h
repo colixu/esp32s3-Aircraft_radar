@@ -4,6 +4,7 @@
 
 #include "../app/AppConfig.h"
 #include "../app/UserSettings.h"
+#include "AdsbFiProvider.h"
 #include "OpenSkyAuthClient.h"
 #include "OpenSkyProvider.h"
 
@@ -62,4 +63,19 @@ private:
                          bool requestOk,
                          uint32_t completedMs,
                          uint32_t durationMs);
+    void publishSnapshot(const AdsbFiProvider &provider,
+                         bool requestOk,
+                         uint32_t completedMs,
+                         uint32_t durationMs);
+    void publishSnapshotData(const ApiAircraft *aircraft,
+                             uint8_t aircraftCount,
+                             uint16_t rawStateCount,
+                             uint16_t validPositionCount,
+                             int httpStatusCode,
+                             uint32_t payloadLength,
+                             uint32_t providerLastSuccessMs,
+                             const char *lastError,
+                             bool requestOk,
+                             uint32_t completedMs,
+                             uint32_t durationMs);
 };

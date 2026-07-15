@@ -145,7 +145,8 @@ void OpenSkyAsyncUpdater::taskEntry(void *arg)
 
 void OpenSkyAsyncUpdater::taskLoop()
 {
-    OpenSkyProvider provider;
+    OpenSkyProvider openSkyProvider;
+    AdsbFiProvider adsbFiProvider;
 
     while (!stopRequested_)
     {
@@ -163,20 +164,70 @@ void OpenSkyAsyncUpdater::taskLoop()
         }
 
         updating_ = true;
-        DebugLog::println("API request start");
+        const bool useAdsbFi = settings_.api.provider == ApiProvider::AdsbFi;
+        const char *providerName = useAdsbFi ? "adsb.fi" : "OpenSky";
+        DebugLog::printf("[%s] API request start\r\n", providerName);
         const uint32_t startMs = millis();
-        const bool requestOk = provider.requestStates(config_, settings_, &authClient_);
+        bool requestOk = false;
+        int httpStatus = 0;
+        uint8_t aircraftCount = 0;
+        bool publishAdsbFi = useAdsbFi;
+        bool primaryRateLimited = false;
+        if (useAdsbFi)
+        {
+            requestOk = adsbFiProvider.requestAircraft(settings_);
+            httpStatus = adsbFiProvider.httpStatusCode();
+            aircraftCount = adsbFiProvider.aircraftCount();
+            primaryRateLimited = httpStatus == 429;
+            if (!requestOk)
+            {
+                DebugLog::printf("[adsb.fi] request failed: HTTP %d %s, trying OpenSky fallback\r\n",
+                                 httpStatus,
+                                 adsbFiProvider.lastError());
+                const bool fallbackOk = openSkyProvider.requestStates(config_, settings_, &authClient_);
+                DebugLog::printf("[OpenSky fallback] HTTP %d aircraft=%u status=%s\r\n",
+                                 openSkyProvider.httpStatusCode(),
+                                 openSkyProvider.aircraftCount(),
+                                 openSkyProvider.lastError());
+                requestOk = fallbackOk;
+                httpStatus = openSkyProvider.httpStatusCode();
+                aircraftCount = openSkyProvider.aircraftCount();
+                publishAdsbFi = false;
+                providerName = "OpenSky fallback";
+            }
+        }
+        else
+        {
+            requestOk = openSkyProvider.requestStates(config_, settings_, &authClient_);
+            httpStatus = openSkyProvider.httpStatusCode();
+            aircraftCount = openSkyProvider.aircraftCount();
+        }
         const uint32_t completedMs = millis();
         const uint32_t durationMs = completedMs - startMs;
-        DebugLog::printf("API request done, duration=%lu ms\r\n", static_cast<unsigned long>(durationMs));
+        DebugLog::printf("[%s] HTTP %d aircraft=%u interval=%lus duration=%lu ms\r\n",
+                         providerName,
+                         httpStatus,
+                         aircraftCount,
+                         static_cast<unsigned long>(requestIntervalMs_ / 1000UL),
+                         static_cast<unsigned long>(durationMs));
 
-        publishSnapshot(provider, requestOk, completedMs, durationMs);
+        if (publishAdsbFi)
+        {
+            publishSnapshot(adsbFiProvider, requestOk, completedMs, durationMs);
+        }
+        else
+        {
+            publishSnapshot(openSkyProvider, requestOk, completedMs, durationMs);
+        }
         updating_ = false;
 
         uint32_t waitMs = requestIntervalMs_;
-        if (provider.httpStatusCode() == 429)
+        if (httpStatus == 429 || primaryRateLimited)
         {
-            waitMs = max<uint32_t>(requestIntervalMs_ * 2, 120000);
+            waitMs = max<uint32_t>(requestIntervalMs_ * 2, primaryRateLimited ? 60000 : 120000);
+            DebugLog::printf("[%s] HTTP 429 rate limited, backoff=%lus\r\n",
+                             primaryRateLimited ? "adsb.fi" : providerName,
+                             static_cast<unsigned long>(waitMs / 1000UL));
         }
         nextRequestMs_ = millis() + waitMs;
     }
@@ -191,23 +242,65 @@ void OpenSkyAsyncUpdater::publishSnapshot(const OpenSkyProvider &provider,
                                           uint32_t completedMs,
                                           uint32_t durationMs)
 {
+    publishSnapshotData(provider.aircraft(),
+                        provider.aircraftCount(),
+                        provider.rawStateCount(),
+                        provider.validPositionCount(),
+                        provider.httpStatusCode(),
+                        provider.payloadLength(),
+                        provider.lastSuccessMs(),
+                        provider.lastError(),
+                        requestOk,
+                        completedMs,
+                        durationMs);
+}
+
+void OpenSkyAsyncUpdater::publishSnapshot(const AdsbFiProvider &provider,
+                                          bool requestOk,
+                                          uint32_t completedMs,
+                                          uint32_t durationMs)
+{
+    publishSnapshotData(provider.aircraft(),
+                        provider.aircraftCount(),
+                        provider.rawStateCount(),
+                        provider.validPositionCount(),
+                        provider.httpStatusCode(),
+                        provider.payloadLength(),
+                        provider.lastSuccessMs(),
+                        provider.lastError(),
+                        requestOk,
+                        completedMs,
+                        durationMs);
+}
+
+void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
+                                              uint8_t aircraftCount,
+                                              uint16_t rawStateCount,
+                                              uint16_t validPositionCount,
+                                              int httpStatusCode,
+                                              uint32_t payloadLength,
+                                              uint32_t providerLastSuccessMs,
+                                              const char *lastError,
+                                              bool requestOk,
+                                              uint32_t completedMs,
+                                              uint32_t durationMs)
+{
     OpenSkySnapshot next;
-    next.aircraftCount = provider.aircraftCount();
-    next.rawStateCount = provider.rawStateCount();
-    next.validPositionCount = provider.validPositionCount();
-    next.httpStatusCode = provider.httpStatusCode();
-    next.payloadLength = provider.payloadLength();
-    next.lastSuccessMs = provider.lastSuccessMs();
+    next.aircraftCount = aircraftCount;
+    next.rawStateCount = rawStateCount;
+    next.validPositionCount = validPositionCount;
+    next.httpStatusCode = httpStatusCode;
+    next.payloadLength = payloadLength;
+    next.lastSuccessMs = providerLastSuccessMs;
     next.completedMs = completedMs;
     next.durationMs = durationMs;
     next.requestOk = requestOk;
-    strncpy(next.lastError, provider.lastError(), sizeof(next.lastError) - 1);
+    strncpy(next.lastError, lastError != nullptr ? lastError : "unknown", sizeof(next.lastError) - 1);
     next.lastError[sizeof(next.lastError) - 1] = '\0';
 
-    const ApiAircraft *source = provider.aircraft();
     for (uint8_t i = 0; i < next.aircraftCount; ++i)
     {
-        next.aircraft[i] = source[i];
+        next.aircraft[i] = aircraft[i];
     }
 
     if (mutex_ != nullptr && xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) == pdTRUE)

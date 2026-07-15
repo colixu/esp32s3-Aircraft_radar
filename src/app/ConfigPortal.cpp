@@ -265,7 +265,7 @@ void ConfigPortal::handleStatus()
              sizeof(body),
              "{\"portalMode\":\"%s\",\"apSsid\":\"%s\",\"apIp\":\"%s\",\"staIp\":\"%s\","
              "\"wifiConfigured\":%s,\"wifiConnected\":%s,\"currentIP\":\"%s\","
-             "\"apiMode\":\"%s\",\"centerLat\":%.6f,\"centerLon\":%.6f,"
+             "\"apiProvider\":\"%s\",\"apiMode\":\"%s\",\"centerLat\":%.6f,\"centerLon\":%.6f,"
              "\"maxRangeKm\":%.1f,\"scheduleEnabled\":%s,\"computedRequestIntervalMs\":%lu,"
              "\"activeRequestIntervalMs\":%lu,\"idleDisplayMode\":\"%s\","
              "\"nvsEnabled\":%s}",
@@ -276,6 +276,7 @@ void ConfigPortal::handleStatus()
              settings_->wifi.configured ? "true" : "false",
              WiFi.status() == WL_CONNECTED ? "true" : "false",
              mode_ == ConfigPortalMode::StaSettings ? staIpAddress_ : ipAddress_,
+             apiProviderName(settings_->api.provider),
              apiAccountModeName(settings_->api.accountMode),
              settings_->location.centerLat,
              settings_->location.centerLon,
@@ -320,6 +321,17 @@ void ConfigPortal::renderSimplePage()
     const uint32_t activeSeconds = computeActiveSecondsPerDay(settings.schedule);
     const uint32_t intervalMs = activeRequestIntervalMs(settings);
     const uint32_t estimatedRequests = intervalMs > 0 ? (activeSeconds * 1000UL) / intervalMs : 0;
+    uint8_t selectedRangePreset = 0;
+    float selectedRangeDelta = fabsf(settings.location.maxRangeKm - settings.location.rangePresetsKm[0]);
+    for (uint8_t i = 1; i < 3; ++i)
+    {
+        const float delta = fabsf(settings.location.maxRangeKm - settings.location.rangePresetsKm[i]);
+        if (delta < selectedRangeDelta)
+        {
+            selectedRangePreset = i;
+            selectedRangeDelta = delta;
+        }
+    }
 
     sendPageHeader(text("Aircraft Radar Setup", "航班雷达设置"));
     sendLanguageSwitch("/");
@@ -363,37 +375,49 @@ void ConfigPortal::renderSimplePage()
     sendNumberInput(text("Longitude", "经度"), "centerLon", value, "0.000001");
     write("<button type=\"button\" onclick=\"usePhoneLocation()\">");
     write(text("Use this phone location", "使用手机当前位置"));
-    write("</button><p id=\"geoStatus\"></p>");
+    write("</button><p id=\"geoStatus\" class=\"hint\"></p>");
     write("<label>");
     write(text("Display range", "显示范围"));
-    write("<select name=\"displayRangeKm\">");
-    sendSelectOption("30", "30 km", fabsf(settings.location.maxRangeKm - 30.0f) < 0.5f);
-    sendSelectOption("60", "60 km", fabsf(settings.location.maxRangeKm - 60.0f) < 0.5f);
-    sendSelectOption("100", "100 km", fabsf(settings.location.maxRangeKm - 100.0f) < 0.5f);
-    if (fabsf(settings.location.maxRangeKm - 30.0f) >= 0.5f &&
-        fabsf(settings.location.maxRangeKm - 60.0f) >= 0.5f &&
-        fabsf(settings.location.maxRangeKm - 100.0f) >= 0.5f)
-    {
-        snprintf(value, sizeof(value), "%.0f", settings.location.maxRangeKm);
-        sendSelectOption(value, "Custom", true);
-    }
-    write("</select></label></fieldset>");
+    write("<select name=\"displayRangePreset\">");
+    snprintf(value, sizeof(value), "Preset 1 - %.0f km", settings.location.rangePresetsKm[0]);
+    sendSelectOption("0", value, selectedRangePreset == 0);
+    snprintf(value, sizeof(value), "Preset 2 - %.0f km", settings.location.rangePresetsKm[1]);
+    sendSelectOption("1", value, selectedRangePreset == 1);
+    snprintf(value, sizeof(value), "Preset 3 - %.0f km", settings.location.rangePresetsKm[2]);
+    sendSelectOption("2", value, selectedRangePreset == 2);
+    write("</select></label>");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[0]);
+    sendNumberInput(text("Range preset 1 km", "范围档位 1 km"), "rangePreset1Km", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[1]);
+    sendNumberInput(text("Range preset 2 km", "范围档位 2 km"), "rangePreset2Km", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[2]);
+    sendNumberInput(text("Range preset 3 km", "范围档位 3 km"), "rangePreset3Km", value, "0.1");
+    write("</fieldset>");
 
     write("<fieldset><legend>");
     write(text("Data Account", "数据账号"));
     write("</legend>");
     write("<p>");
-    write(text("Authenticated mode requires an OpenSky API Client. Create a client in your OpenSky account, then paste the Client ID and Client Secret here. Do not enter your OpenSky website password.",
-               "认证模式需要 OpenSky API Client。请在 OpenSky 账号中创建 API Client，然后填写 Client ID 和 Client Secret。不要填写 OpenSky 网站登录密码。"));
-    write("</p><label>");
-    write(text("API mode", "API 模式"));
+    write(text("Choose adsb.fi Open Data for no-login public data, or OpenSky if you want to use the OpenSky backup source.",
+               "选择 adsb.fi Open Data 可无需登录使用公共数据；如需备用数据源，可切换到 OpenSky。"));
+    write("</p><label>Data Source<select name=\"dataSource\" onchange=\"toggleDataSource(this.value)\">");
+    sendSelectOption("adsbfi", "adsb.fi Open Data", settings.api.provider == ApiProvider::AdsbFi);
+    sendSelectOption("opensky", "OpenSky", settings.api.provider == ApiProvider::OpenSky);
+    write("</select></label>");
+    snprintf(value, sizeof(value), "%.1f", static_cast<float>(activeRequestIntervalMs(settings)) / 1000.0f);
+    write("<label>");
+    write(text("Refresh interval seconds", "刷新间隔秒数"));
+    write("<input name=\"apiIntervalSec\" type=\"number\" min=\"1\" max=\"3600\" step=\"0.1\" value=\"");
+    write(value);
+    write("\"></label>");
+    write("<p class=\"hint\" id=\"dataSourceHint\"></p><div id=\"openSkyAccountFields\"><label>API mode");
     write("<select name=\"apiMode\" onchange=\"toggleClientFields(this.value)\">");
     sendSelectOption("anonymous", text("Anonymous Free Mode", "免费匿名模式"), settings.api.accountMode == ApiAccountMode::Anonymous);
     sendSelectOption("client", text("Use My OpenSky API Client", "使用我的 OpenSky API Client"), settings.api.accountMode != ApiAccountMode::Anonymous);
     write("</select></label><div id=\"clientFields\">");
     sendTextInput("OpenSky Client ID", "openSkyClientId", settings.api.openSkyClientId, false);
     sendTextInput("OpenSky Client Secret", "openSkyClientSecret", "", true);
-    write("</div></fieldset>");
+    write("</div></div></fieldset>");
 
     write("<fieldset><legend>");
     write(text("Run Schedule", "运行时段"));
@@ -527,12 +551,13 @@ void ConfigPortal::renderSimplePage()
     write("function hiddenNumber(id,f){var e=document.getElementById(id);var v=e?parseFloat(e.value):NaN;return isNaN(v)?f:v;}");
     write("function activeSecondsPerDay(){var m=byName('scheduleMode');if(!m||m.value!='window'){return 86400;}var s=numberValue('startHour',0)*60+numberValue('startMinute',0);var e=numberValue('endHour',0)*60+numberValue('endMinute',0);s=((Math.floor(s)%1440)+1440)%1440;e=((Math.floor(e)%1440)+1440)%1440;if(s==e){return 86400;}if(e>s){return (e-s)*60;}return (1440-s+e)*60;}");
     write("function updateScheduleVisibility(){var m=byName('scheduleMode');var f=document.getElementById('scheduleFields');if(f&&m){f.style.display=(m.value=='window')?'block':'none';}}");
-    write("function updateUsageEstimate(){var api=byName('apiMode');var client=api&&api.value=='client';var active=activeSecondsPerDay();var reserve=hiddenNumber('creditReserveRatio',0.90);var cost=hiddenNumber('requestCostCredits',1.0);var budget=client?hiddenNumber('clientDailyCreditBudget',4000):hiddenNumber('anonymousDailyCreditBudget',400);var minMs=client?hiddenNumber('clientMinIntervalMs',5000):hiddenNumber('anonymousMinIntervalMs',10000);var currentMode=document.getElementById('currentApiMode');currentMode=currentMode?currentMode.value:'';var sameMode=(client&&currentMode=='client')||(!client&&currentMode=='anonymous');if(sameMode){var currentBudget=hiddenNumber('currentDailyCreditBudget',0);var currentMin=hiddenNumber('currentMinUsefulIntervalMs',0);if(currentBudget>0){budget=currentBudget;}if(currentMin>minMs){minMs=currentMin;}}var usable=budget*reserve;var effective=usable/cost;var intervalMs=effective>0?(active/effective)*1000:minMs;if(intervalMs<minMs){intervalMs=minMs;}var requests=Math.floor((active*1000)/intervalMs);document.getElementById('usageApiMode').innerText=client?'OpenSkyClient':'Anonymous';document.getElementById('usageDailyBudget').innerText=String(Math.round(budget));document.getElementById('usageActiveHours').innerText=(active/3600).toFixed(1)+' h';document.getElementById('usageRefreshInterval').innerText=Math.round(intervalMs/1000)+'s';document.getElementById('usageDailyRequests').innerText=String(requests);updateScheduleVisibility();}");
-    write("function bindUsageEstimate(){['scheduleMode','startHour','startMinute','endHour','endMinute','apiMode'].forEach(function(n){var e=byName(n);if(e){e.addEventListener('change',updateUsageEstimate);e.addEventListener('input',updateUsageEstimate);}});['creditReserveRatio','requestCostCredits','currentDailyCreditBudget','currentApiMode','anonymousDailyCreditBudget','clientDailyCreditBudget','anonymousMinIntervalMs','clientMinIntervalMs','currentMinUsefulIntervalMs'].forEach(function(id){var e=document.getElementById(id);if(e){e.addEventListener('change',updateUsageEstimate);e.addEventListener('input',updateUsageEstimate);}});}");
-    write("function usePhoneLocation(){var s=document.getElementById('geoStatus');if(!navigator.geolocation){s.innerText='Geolocation not available';return;}navigator.geolocation.getCurrentPosition(function(p){document.querySelector('[name=centerLat]').value=p.coords.latitude.toFixed(6);document.querySelector('[name=centerLon]').value=p.coords.longitude.toFixed(6);s.innerText='Location filled';},function(){s.innerText='Location denied, enter manually';});}");
+    write("function updateUsageEstimate(){var ds=byName('dataSource');var adsb=!ds||ds.value=='adsbfi';var api=byName('apiMode');var client=api&&api.value=='client';var active=activeSecondsPerDay();var reserve=hiddenNumber('creditReserveRatio',0.90);var cost=hiddenNumber('requestCostCredits',1.0);var budget=client?hiddenNumber('clientDailyCreditBudget',4000):hiddenNumber('anonymousDailyCreditBudget',400);var minMs=client?hiddenNumber('clientMinIntervalMs',5000):hiddenNumber('anonymousMinIntervalMs',10000);if(adsb){budget=0;minMs=1000;}var requestedMs=numberValue('apiIntervalSec',adsb?10:(minMs/1000))*1000;var currentMode=document.getElementById('currentApiMode');currentMode=currentMode?currentMode.value:'';var sameMode=(client&&currentMode=='client')||(!client&&currentMode=='anonymous');if(!adsb&&sameMode){var currentBudget=hiddenNumber('currentDailyCreditBudget',0);var currentMin=hiddenNumber('currentMinUsefulIntervalMs',0);if(currentBudget>0){budget=currentBudget;}if(currentMin>minMs){minMs=currentMin;}}var intervalMs=requestedMs;if(intervalMs<minMs){intervalMs=minMs;}if(intervalMs>3600000){intervalMs=3600000;}var requests=Math.floor((active*1000)/intervalMs);document.getElementById('usageApiMode').innerText=adsb?'adsb.fi Open Data':(client?'OpenSkyClient':'OpenSky Anonymous');document.getElementById('usageDailyBudget').innerText=adsb?'N/A':String(Math.round(budget));document.getElementById('usageActiveHours').innerText=(active/3600).toFixed(1)+' h';document.getElementById('usageRefreshInterval').innerText=(intervalMs/1000).toFixed(intervalMs%1000?1:0)+'s';document.getElementById('usageDailyRequests').innerText=String(requests);updateScheduleVisibility();}");
+    write("function bindUsageEstimate(){['scheduleMode','startHour','startMinute','endHour','endMinute','apiMode','dataSource','apiIntervalSec'].forEach(function(n){var e=byName(n);if(e){e.addEventListener('change',updateUsageEstimate);e.addEventListener('input',updateUsageEstimate);}});['creditReserveRatio','requestCostCredits','currentDailyCreditBudget','currentApiMode','anonymousDailyCreditBudget','clientDailyCreditBudget','anonymousMinIntervalMs','clientMinIntervalMs','currentMinUsefulIntervalMs'].forEach(function(id){var e=document.getElementById(id);if(e){e.addEventListener('change',updateUsageEstimate);e.addEventListener('input',updateUsageEstimate);}});}");
+    write("function usePhoneLocation(){var s=document.getElementById('geoStatus');if(!window.isSecureContext){s.innerText='Browser blocks GPS on HTTP IP pages. Enter latitude/longitude manually.';return;}if(!navigator.geolocation){s.innerText='Geolocation is not available in this browser.';return;}s.innerText='Requesting location permission...';navigator.geolocation.getCurrentPosition(function(p){document.querySelector('[name=centerLat]').value=p.coords.latitude.toFixed(6);document.querySelector('[name=centerLon]').value=p.coords.longitude.toFixed(6);s.innerText='Location filled. Accuracy: '+Math.round(p.coords.accuracy)+' m';},function(e){var m='Location failed';if(e.code==1){m='Location permission denied';}else if(e.code==2){m='Location unavailable';}else if(e.code==3){m='Location timeout';}s.innerText=m+'. Enter latitude/longitude manually.';},{enableHighAccuracy:true,timeout:12000,maximumAge:30000});}");
     write("function setBrowserTimezone(){var o=-new Date().getTimezoneOffset();var e=document.getElementById('timezoneOffsetMinutes');var found=false;for(var i=0;i<e.options.length;i++){if(e.options[i].value==String(o)){e.selectedIndex=i;found=true;}}if(!found){var opt=document.createElement('option');opt.value=String(o);opt.text='UTC'+(o>=0?'+':'')+(o/60);opt.selected=true;e.add(opt);}}");
-    write("function toggleClientFields(v){document.getElementById('clientFields').style.display=(v=='client')?'block':'none';updateUsageEstimate();}");
-    write("bindUsageEstimate();toggleClientFields(document.querySelector('[name=apiMode]').value);updateUsageEstimate();");
+    write("function toggleClientFields(v){var c=document.getElementById('clientFields');if(c){c.style.display=(v=='client')?'block':'none';}updateUsageEstimate();}");
+    write("function toggleDataSource(v){var open=v=='opensky';var f=document.getElementById('openSkyAccountFields');var h=document.getElementById('dataSourceHint');if(f){f.style.display=open?'block':'none';}if(h){h.innerText=open?'OpenSky can use anonymous mode or your API Client.':'adsb.fi public endpoint does not require login.';}updateUsageEstimate();}");
+    write("bindUsageEstimate();toggleClientFields(document.querySelector('[name=apiMode]').value);toggleDataSource(document.querySelector('[name=dataSource]').value);updateUsageEstimate();");
     write("</script>");
     sendPageFooter();
 }
@@ -565,6 +590,12 @@ void ConfigPortal::renderAdvancedPage()
     sendNumberInput("centerLon", "centerLon", value, "0.000001");
     snprintf(value, sizeof(value), "%.1f", settings.location.maxRangeKm);
     sendNumberInput("maxRangeKm", "maxRangeKm", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[0]);
+    sendNumberInput("rangePreset1Km", "rangePreset1Km", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[1]);
+    sendNumberInput("rangePreset2Km", "rangePreset2Km", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[2]);
+    sendNumberInput("rangePreset3Km", "rangePreset3Km", value, "0.1");
     snprintf(value, sizeof(value), "%.6f", settings.location.queryLatMin);
     sendNumberInput("queryLatMin", "queryLatMin", value, "0.000001");
     snprintf(value, sizeof(value), "%.6f", settings.location.queryLonMin);
@@ -576,7 +607,10 @@ void ConfigPortal::renderAdvancedPage()
     write("</fieldset>");
 
     write("<fieldset><legend>API / Refresh</legend>");
-    write("<label>Account<select name=\"accountMode\">");
+    write("<label>Provider<select name=\"apiProvider\">");
+    sendSelectOption("0", "OpenSky", settings.api.provider == ApiProvider::OpenSky);
+    sendSelectOption("1", "adsb.fi Open Data", settings.api.provider == ApiProvider::AdsbFi);
+    write("</select></label><label>Account<select name=\"accountMode\">");
     sendSelectOption("0", "Anonymous", settings.api.accountMode == ApiAccountMode::Anonymous);
     sendSelectOption("1", "StandardUser", settings.api.accountMode == ApiAccountMode::StandardUser);
     sendSelectOption("2", "ActiveFeeder", settings.api.accountMode == ApiAccountMode::ActiveFeeder);
@@ -704,25 +738,49 @@ void ConfigPortal::applySimpleFormToSettings()
 
     settings.location.centerLat = argToFloat("centerLat", settings.location.centerLat);
     settings.location.centerLon = argToFloat("centerLon", settings.location.centerLon);
-    settings.location.maxRangeKm = argToFloat("displayRangeKm", settings.location.maxRangeKm);
+    settings.location.rangePresetsKm[0] = argToFloat("rangePreset1Km", settings.location.rangePresetsKm[0]);
+    settings.location.rangePresetsKm[1] = argToFloat("rangePreset2Km", settings.location.rangePresetsKm[1]);
+    settings.location.rangePresetsKm[2] = argToFloat("rangePreset3Km", settings.location.rangePresetsKm[2]);
+    const uint8_t selectedRangePreset = static_cast<uint8_t>(argToInt("displayRangePreset", 0));
+    if (selectedRangePreset < 3)
+    {
+        settings.location.maxRangeKm = settings.location.rangePresetsKm[selectedRangePreset];
+    }
     updateQueryBoxFromCenterRange(settings);
 
-    settings.api.provider = ApiProvider::OpenSky;
+    const String dataSource = server_.hasArg("dataSource") ? server_.arg("dataSource") : "adsbfi";
+    settings.api.provider = dataSource == "opensky" ? ApiProvider::OpenSky : ApiProvider::AdsbFi;
     const String apiMode = server_.hasArg("apiMode") ? server_.arg("apiMode") : "anonymous";
-    settings.api.refreshPolicy = RefreshPolicy::AutoByDailyBudget;
-    if (apiMode == "client")
+    uint32_t requestedIntervalMs = static_cast<uint32_t>(argToFloat("apiIntervalSec",
+                                                                    static_cast<float>(activeRequestIntervalMs(settings)) / 1000.0f) *
+                                                         1000.0f);
+    requestedIntervalMs = max<uint32_t>(requestedIntervalMs, 1000);
+    requestedIntervalMs = min<uint32_t>(requestedIntervalMs, 3600000);
+    if (settings.api.provider == ApiProvider::AdsbFi)
     {
+        settings.api.accountMode = ApiAccountMode::Anonymous;
+        settings.api.refreshPolicy = RefreshPolicy::ManualInterval;
+        settings.api.dailyCreditBudget = 400;
+        settings.api.minUsefulIntervalMs = 1000;
+        settings.api.manualRequestIntervalMs = requestedIntervalMs;
+    }
+    else if (apiMode == "client")
+    {
+        settings.api.refreshPolicy = RefreshPolicy::ManualInterval;
         settings.api.accountMode = ApiAccountMode::OpenSkyClient;
         settings.api.dailyCreditBudget = 4000;
         settings.api.minUsefulIntervalMs = 5000;
+        settings.api.manualRequestIntervalMs = requestedIntervalMs;
         copyArgToBuffer("openSkyClientId", settings.api.openSkyClientId, sizeof(settings.api.openSkyClientId), false);
         copyArgToBuffer("openSkyClientSecret", settings.api.openSkyClientSecret, sizeof(settings.api.openSkyClientSecret), true);
     }
     else
     {
+        settings.api.refreshPolicy = RefreshPolicy::ManualInterval;
         settings.api.accountMode = ApiAccountMode::Anonymous;
         settings.api.dailyCreditBudget = 400;
         settings.api.minUsefulIntervalMs = 10000;
+        settings.api.manualRequestIntervalMs = requestedIntervalMs;
     }
 
     const String scheduleMode = server_.hasArg("scheduleMode") ? server_.arg("scheduleMode") : "always";
@@ -745,11 +803,15 @@ void ConfigPortal::applyAdvancedFormToSettings()
     settings.location.centerLat = argToFloat("centerLat", settings.location.centerLat);
     settings.location.centerLon = argToFloat("centerLon", settings.location.centerLon);
     settings.location.maxRangeKm = argToFloat("maxRangeKm", settings.location.maxRangeKm);
+    settings.location.rangePresetsKm[0] = argToFloat("rangePreset1Km", settings.location.rangePresetsKm[0]);
+    settings.location.rangePresetsKm[1] = argToFloat("rangePreset2Km", settings.location.rangePresetsKm[1]);
+    settings.location.rangePresetsKm[2] = argToFloat("rangePreset3Km", settings.location.rangePresetsKm[2]);
     settings.location.queryLatMin = argToFloat("queryLatMin", settings.location.queryLatMin);
     settings.location.queryLonMin = argToFloat("queryLonMin", settings.location.queryLonMin);
     settings.location.queryLatMax = argToFloat("queryLatMax", settings.location.queryLatMax);
     settings.location.queryLonMax = argToFloat("queryLonMax", settings.location.queryLonMax);
 
+    settings.api.provider = static_cast<ApiProvider>(argToInt("apiProvider", static_cast<int>(settings.api.provider)));
     settings.api.accountMode = static_cast<ApiAccountMode>(argToInt("accountMode", static_cast<int>(settings.api.accountMode)));
     settings.api.refreshPolicy = static_cast<RefreshPolicy>(argToInt("refreshPolicy", static_cast<int>(settings.api.refreshPolicy)));
     copyArgToBuffer("openSkyClientId", settings.api.openSkyClientId, sizeof(settings.api.openSkyClientId), false);
@@ -830,7 +892,7 @@ void ConfigPortal::sendPageHeader(const char *title)
     write("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
     write("<title>");
     write(title);
-    write("</title><style>body{font-family:sans-serif;margin:20px;max-width:760px}fieldset{margin:12px 0;padding:10px;border:1px solid #bbb}label{display:block;margin:8px 0}input,select{width:100%;box-sizing:border-box;padding:6px}button{padding:8px 14px}a{display:inline-block;margin:4px 8px 4px 0}.hint{font-size:.9em;color:#555}</style></head><body>");
+    write("</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;margin:16px auto;padding:0 12px;max-width:940px;background:#f4f7fb;color:#172033}h1{font-size:24px;margin:8px 0 12px}form{display:grid;gap:12px}fieldset{margin:0;padding:14px;border:1px solid #d7e0ea;border-radius:10px;background:#fff;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 14px}legend{font-weight:700;padding:0 6px}label{display:block;color:#526070;font-size:13px;font-weight:600}input,select{width:100%;box-sizing:border-box;margin-top:5px;padding:9px;border:1px solid #cfd8e3;border-radius:8px;background:#fbfcfe;font-size:15px}button{padding:10px 14px;border:0;border-radius:8px;background:#1269d3;color:#fff;font-weight:700}button[type=button]{background:#e7eef8;color:#16406f}a{display:inline-block;margin:4px 8px 4px 0;color:#1269d3;text-decoration:none;font-weight:600}.hint,fieldset>p,fieldset>div{grid-column:1/-1}.hint{font-size:13px;color:#64748b}@media(max-width:560px){body{margin:10px auto}fieldset{grid-template-columns:1fr}}</style></head><body>");
 }
 
 void ConfigPortal::sendPageFooter()

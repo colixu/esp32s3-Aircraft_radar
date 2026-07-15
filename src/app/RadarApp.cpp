@@ -1,6 +1,7 @@
 #include "RadarApp.h"
 
 #include <WiFi.h>
+#include <math.h>
 #include <string.h>
 
 #include "DebugLog.h"
@@ -14,6 +15,10 @@ namespace
     constexpr uint32_t kLocalMenuTimeoutMs = 30000;
     constexpr uint32_t kLocalMenuOpenLongGuardMs = 8000;
     constexpr uint32_t kLocalMenuRefreshMs = 500;
+    constexpr uint32_t kIdleThemePreviewMs = 30000;
+    constexpr uint32_t kIdleRangePreviewMs = 10UL * 60UL * 1000UL;
+    constexpr uint32_t kIdleRangePreviewRefreshMs = 10000;
+    constexpr uint32_t kIdleRangePreviewApiIntervalMs = 5UL * 60UL * 1000UL;
     constexpr uint8_t kLocalMenuItemCount = 7;
     constexpr uint8_t kBrightnessLevelCount = 4;
 
@@ -238,15 +243,26 @@ void RadarApp::beginRealRadar()
                      settings_.location.centerLat,
                      settings_.location.centerLon,
                      settings_.location.maxRangeKm);
+    DebugLog::printf("Provider: %s\r\n", apiProviderName(settings_.api.provider));
     DebugLog::printf("RealRadar filters: ground=%s minAlt=%.0fm minSpeed=%.1fm/s\r\n",
                      settings_.filter.showGroundTraffic ? "show" : "hide",
                      settings_.filter.minAirborneAltitudeM,
                      settings_.filter.minAirborneSpeedMs);
-    DebugLog::printf("OpenSky bbox: lat %.4f..%.4f lon %.4f..%.4f\r\n",
-                     config_.openSkyLamin,
-                     config_.openSkyLamax,
-                     config_.openSkyLomin,
-                     config_.openSkyLomax);
+    if (settings_.api.provider == ApiProvider::OpenSky)
+    {
+        DebugLog::printf("OpenSky bbox: lat %.4f..%.4f lon %.4f..%.4f\r\n",
+                         config_.openSkyLamin,
+                         config_.openSkyLamax,
+                         config_.openSkyLomin,
+                         config_.openSkyLomax);
+    }
+    else if (settings_.api.provider == ApiProvider::AdsbFi)
+    {
+        DebugLog::printf("adsb.fi query center: lat=%.5f lon=%.5f range=%.0fkm\r\n",
+                         settings_.location.centerLat,
+                         settings_.location.centerLon,
+                         settings_.location.maxRangeKm);
+    }
     currentRealApiIntervalMs_ = activeRequestIntervalMs(settings_);
     DebugLog::printf("RealRadar API interval: %lu ms (%s)\r\n",
                      static_cast<unsigned long>(currentRealApiIntervalMs_),
@@ -384,6 +400,10 @@ void RadarApp::handleInputEvent(InputEvent event)
             else
             {
                 switchUiTheme();
+                if (deviceState_ == DeviceState::PausedBySchedule)
+                {
+                    startIdleUiPreview(millis(), kIdleThemePreviewMs, config_.frameIntervalMs);
+                }
             }
             break;
 
@@ -493,6 +513,10 @@ void RadarApp::handleButtonInputEvent(InputEvent event)
             else
             {
                 switchUiTheme();
+                if (deviceState_ == DeviceState::PausedBySchedule)
+                {
+                    startIdleUiPreview(millis(), kIdleThemePreviewMs, config_.frameIntervalMs);
+                }
             }
             break;
 
@@ -504,20 +528,52 @@ void RadarApp::handleButtonInputEvent(InputEvent event)
             else
             {
                 switchRange();
+                if (deviceState_ == DeviceState::PausedBySchedule)
+                {
+                    startIdleUiPreview(millis(),
+                                       kIdleRangePreviewMs,
+                                       kIdleRangePreviewRefreshMs,
+                                       kIdleRangePreviewApiIntervalMs);
+                }
             }
             break;
 
         case InputEvent::KeyUpLong:
         case InputEvent::KeyDownLong:
-            openLocalMenu();
+            if (deviceState_ == DeviceState::SetupPortal)
+            {
+                toggleSetupDisplayMode();
+            }
+            else
+            {
+                openLocalMenu();
+            }
             break;
 
         case InputEvent::KeyUpDouble:
-            DebugLog::println("KEY_UP double press: no action in current view.");
+            if (deviceState_ == DeviceState::SetupPortal || staSettingsOverlayVisible_)
+            {
+                toggleSetupDisplayMode();
+            }
+            else
+            {
+                DebugLog::println("KEY_UP double press: no action in current view.");
+            }
             break;
 
         case InputEvent::KeyDownDouble:
-            DebugLog::println("KEY_DOWN double press: no action in current view.");
+            if (deviceState_ == DeviceState::SetupPortal)
+            {
+                exitSetupPortal();
+            }
+            else if (staSettingsOverlayVisible_)
+            {
+                hideStaSettingsOverlay();
+            }
+            else
+            {
+                DebugLog::println("KEY_DOWN double press: no action in current view.");
+            }
             break;
 
         case InputEvent::None:
@@ -745,6 +801,7 @@ void RadarApp::handleLocalMenuButtonEvent(InputEvent event)
             if (event == InputEvent::KeyUpDouble)
             {
                 closeLocalMenu(false);
+                setupPortalFromLocalMenu_ = true;
                 enterSetupPortal("Local menu");
             }
             else if (event == InputEvent::KeyDownDouble)
@@ -911,6 +968,94 @@ void RadarApp::renderCurrentDisplay()
     else
     {
         renderFrame();
+    }
+}
+
+bool RadarApp::isIdleUiPreviewActive(uint32_t now) const
+{
+    return idleUiPreviewUntilMs_ != 0 &&
+           static_cast<int32_t>(idleUiPreviewUntilMs_ - now) > 0;
+}
+
+void RadarApp::startIdleUiPreview(uint32_t now, uint32_t durationMs, uint32_t refreshMs, uint32_t apiIntervalMs)
+{
+    idleUiPreviewUntilMs_ = now + durationMs;
+    idleUiPreviewRefreshMs_ = refreshMs > 0 ? refreshMs : config_.frameIntervalMs;
+    idleUiPreviewApiIntervalMs_ = apiIntervalMs;
+    lastFrameMs_ = 0;
+    DebugLog::printf("Idle UI preview: duration=%lu ms refresh=%lu ms api=%lu ms\r\n",
+                     static_cast<unsigned long>(durationMs),
+                     static_cast<unsigned long>(idleUiPreviewRefreshMs_),
+                     static_cast<unsigned long>(idleUiPreviewApiIntervalMs_));
+    renderIdleUiPreviewFrame();
+}
+
+void RadarApp::updateIdleRealRadarPreview(uint32_t now, bool previewActive)
+{
+    if (!previewActive)
+    {
+        idleUiPreviewUntilMs_ = 0;
+        idleUiPreviewRefreshMs_ = 0;
+        idleUiPreviewApiIntervalMs_ = 0;
+        stopRealRadarUpdater();
+        return;
+    }
+
+    if (idleUiPreviewApiIntervalMs_ > 0)
+    {
+        bool intervalChanged = false;
+        if (currentRealApiIntervalMs_ != idleUiPreviewApiIntervalMs_)
+        {
+            currentRealApiIntervalMs_ = idleUiPreviewApiIntervalMs_;
+            intervalChanged = true;
+            DebugLog::printf("Idle preview API interval: %lu ms\r\n",
+                             static_cast<unsigned long>(currentRealApiIntervalMs_));
+        }
+
+        if (!realApiUpdater_.isRunning())
+        {
+            if (realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_))
+            {
+                DebugLog::println("Idle preview API updater running.");
+            }
+        }
+        else if (intervalChanged)
+        {
+            realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_);
+        }
+    }
+
+    OpenSkySnapshot snapshot;
+    if (realApiUpdater_.copySnapshot(snapshot))
+    {
+        handleRealRadarSnapshot(snapshot, now);
+    }
+
+    realTrackManager_.updatePrediction(settings_, now);
+    RealRadarTrackStats frameStats;
+    rebuildRealRadarAircraft(frameStats);
+    updateSelectedAircraftForList(realAircraft_, realAircraftCount_, now);
+    updateRealRadarStatus();
+}
+
+void RadarApp::renderIdleUiPreviewFrame()
+{
+    if (!renderer_.isReady())
+    {
+        return;
+    }
+
+    if (config_.appMode == AppMode::RealRadar)
+    {
+        renderRealRadarFrame();
+    }
+    else if (config_.appMode == AppMode::RadarDemo)
+    {
+        renderFrame();
+    }
+    else
+    {
+        renderApiTestScreen();
     }
 }
 
@@ -1656,20 +1801,23 @@ void RadarApp::switchUiTheme()
 
 void RadarApp::switchRange()
 {
-    if (settings_.location.maxRangeKm < 45.0f)
+    sanitizeUserSettings(settings_);
+
+    uint8_t selectedPreset = 0;
+    float selectedDelta = fabsf(settings_.location.maxRangeKm - settings_.location.rangePresetsKm[0]);
+    for (uint8_t i = 1; i < 3; ++i)
     {
-        settings_.location.maxRangeKm = 60.0f;
-    }
-    else if (settings_.location.maxRangeKm < 90.0f)
-    {
-        settings_.location.maxRangeKm = 120.0f;
-    }
-    else
-    {
-        settings_.location.maxRangeKm = 30.0f;
+        const float delta = fabsf(settings_.location.maxRangeKm - settings_.location.rangePresetsKm[i]);
+        if (delta < selectedDelta)
+        {
+            selectedPreset = i;
+            selectedDelta = delta;
+        }
     }
 
-    sanitizeUserSettings(settings_);
+    const uint8_t nextPreset = (selectedPreset + 1) % 3;
+    settings_.location.maxRangeKm = settings_.location.rangePresetsKm[nextPreset];
+    updateQueryBoxFromCenterRange(settings_);
     DebugLog::printf("Range switched: %.0fkm\r\n", settings_.location.maxRangeKm);
     settingsStore_.save(settings_);
 }
@@ -1930,12 +2078,13 @@ void RadarApp::updateLongRunStatusLog(uint32_t now)
     lastSystemStatusLogMs_ = now;
 
     const SystemStatus status = getSystemStatus();
-    DebugLog::printf("Status: up=%lus heap=%lu min=%lu wifi=%u state=%s api=%lu/%lu aircraft=%u theme=%s\r\n",
+    DebugLog::printf("Status: up=%lus heap=%lu min=%lu wifi=%u state=%s provider=%s api=%lu/%lu aircraft=%u theme=%s\r\n",
                      static_cast<unsigned long>(status.uptimeMs / 1000UL),
                      static_cast<unsigned long>(status.freeHeap),
                      static_cast<unsigned long>(status.minFreeHeap),
                      status.wifiConnected ? 1 : 0,
                      deviceStateName(status.deviceState),
+                     apiProviderName(settings_.api.provider),
                      static_cast<unsigned long>(status.apiRequestCount),
                      static_cast<unsigned long>(status.apiErrorCount),
                      status.aircraftCount,
@@ -1945,7 +2094,16 @@ void RadarApp::updateLongRunStatusLog(uint32_t now)
 void RadarApp::printApiAuthStatus()
 {
     DebugLog::println("API/auth status:");
+    DebugLog::printf("  provider=%s\r\n", apiProviderName(settings_.api.provider));
     DebugLog::printf("  accountMode=%s\r\n", apiAccountModeName(settings_.api.accountMode));
+    if (settings_.api.provider == ApiProvider::AdsbFi)
+    {
+        DebugLog::println("  adsb.fi Open Data uses no OAuth token.");
+        DebugLog::printf("  lastHttpStatus=%d lastApiError=%s\r\n",
+                         realApiUpdater_.lastHttpStatus(),
+                         realApiUpdater_.lastError());
+        return;
+    }
     DebugLog::printf("  hasClientId=%u hasClientSecret=%u\r\n",
                      settings_.api.openSkyClientId[0] != '\0' ? 1 : 0,
                      settings_.api.openSkyClientSecret[0] != '\0' ? 1 : 0);
@@ -1996,8 +2154,55 @@ void RadarApp::enterSetupPortal(const char *reason)
 void RadarApp::exitSetupPortal()
 {
     DebugLog::println("Exiting setup portal.");
+    const bool returnToApp = setupPortalFromLocalMenu_;
+    setupPortalFromLocalMenu_ = false;
     configPortal_.stop();
     wifiLostSinceMs_ = 0;
+
+    if (returnToApp)
+    {
+        DebugLog::println("Returning from local AP setup to app state.");
+        if (config_.appMode == AppMode::RealRadar)
+        {
+            if (connectToConfiguredWiFi())
+            {
+                beginStaSettingsServer();
+                beginRealRadar();
+            }
+            else
+            {
+                setDeviceState(DeviceState::WiFiLost, "AP setup exited");
+                if (!renderer_.isReady())
+                {
+                    renderer_.begin();
+                }
+                renderRealRadarSystemStatus();
+            }
+            return;
+        }
+
+        if (config_.appMode == AppMode::ApiTest)
+        {
+            if (connectToConfiguredWiFi())
+            {
+                beginStaSettingsServer();
+                beginApiTest();
+            }
+            else
+            {
+                if (!apiTestView_.isReady())
+                {
+                    apiTestView_.begin();
+                }
+                renderApiTestScreen();
+            }
+            return;
+        }
+
+        beginRadarDemo();
+        return;
+    }
+
     beginConfiguredMode();
 }
 
@@ -2114,7 +2319,10 @@ bool RadarApp::updateRealRadarRunGate(uint32_t now, bool forceCheck)
 
     if (settings_.schedule.enabled && !timeManager_.isTimeSynced())
     {
-        stopRealRadarUpdater();
+        if (!isIdleUiPreviewActive(now))
+        {
+            stopRealRadarUpdater();
+        }
         setDeviceState(DeviceState::PausedBySchedule, "time not synced");
         if (lastTimeSyncLogMs_ == 0 || now - lastTimeSyncLogMs_ >= 10000)
         {
@@ -2128,7 +2336,10 @@ bool RadarApp::updateRealRadarRunGate(uint32_t now, bool forceCheck)
     const bool active = isWithinSchedule(settings_.schedule, localMinutes);
     if (!active)
     {
-        stopRealRadarUpdater();
+        if (!isIdleUiPreviewActive(now))
+        {
+            stopRealRadarUpdater();
+        }
         setDeviceState(DeviceState::PausedBySchedule, "schedule inactive");
         return false;
     }
@@ -2196,13 +2407,13 @@ void RadarApp::renderRealRadarSystemStatus()
 
     if (!wifi_.isConnected())
     {
-        renderer_.renderSystemStatusFrame("WIFI LOST", "Reconnecting", "");
+        renderer_.renderSystemStatusFrame("WIFI LOST", "Reconnecting", "", settings_.display.uiTheme);
         return;
     }
 
     if (settings_.schedule.enabled && !timeManager_.isTimeSynced())
     {
-        renderer_.renderSystemStatusFrame("TIME SYNC", "Waiting for NTP", "");
+        renderer_.renderSystemStatusFrame("TIME SYNC", "Waiting for NTP", "", settings_.display.uiTheme);
         return;
     }
 
@@ -2212,7 +2423,7 @@ void RadarApp::renderRealRadarSystemStatus()
         return;
     }
 
-    renderer_.renderSystemStatusFrame("STATUS", realRadarStatus_, "");
+    renderer_.renderSystemStatusFrame("STATUS", realRadarStatus_, "", settings_.display.uiTheme);
 }
 
 void RadarApp::renderPausedIdleFrame(bool force)
@@ -2241,7 +2452,7 @@ void RadarApp::renderPausedIdleFrame(bool force)
     if (settings_.schedule.enabled && !timeManager_.isTimeSynced())
     {
         screenSleeping_ = false;
-        renderer_.renderSystemStatusFrame("TIME SYNC", "Waiting for NTP", "");
+        renderer_.renderSystemStatusFrame("TIME SYNC", "Waiting for NTP", "", settings_.display.uiTheme);
         lastIdleDisplayRenderMs_ = millis();
         return;
     }
@@ -2261,7 +2472,7 @@ void RadarApp::renderPausedIdleFrame(bool force)
             char nextRun[24];
             timeManager_.formatLocalTime(localTime, sizeof(localTime));
             snprintf(nextRun, sizeof(nextRun), "Next run: %s", nextStart);
-            renderer_.renderClockFrame(localTime, "", nextRun, "w: settings");
+            renderer_.renderClockFrame(localTime, "", nextRun, "long: menu", settings_.display.uiTheme);
             lastIdleDisplayRenderMs_ = millis();
             break;
         }
@@ -2280,7 +2491,7 @@ void RadarApp::renderPausedIdleFrame(bool force)
             screenSleeping_ = false;
             char line3[24];
             snprintf(line3, sizeof(line3), "Next: %s", nextStart);
-            renderer_.renderSystemStatusFrame("PAUSED", "Outside schedule", line3);
+            renderer_.renderSystemStatusFrame("PAUSED", "Outside schedule", line3, settings_.display.uiTheme);
             lastIdleDisplayRenderMs_ = millis();
             break;
         }
@@ -2399,12 +2610,32 @@ void RadarApp::updateRealRadar(uint32_t now)
 
     if (!updateRealRadarRunGate(now, false))
     {
-        if (now - lastFrameMs_ >= config_.frameIntervalMs)
+        const bool previewActive = isIdleUiPreviewActive(now);
+        if (deviceState_ == DeviceState::PausedBySchedule)
+        {
+            if (previewActive || idleUiPreviewUntilMs_ != 0)
+            {
+                updateIdleRealRadarPreview(now, previewActive);
+            }
+        }
+
+        const uint32_t pausedFrameIntervalMs = previewActive && idleUiPreviewRefreshMs_ > 0 ?
+                                               idleUiPreviewRefreshMs_ :
+                                               config_.frameIntervalMs;
+        if (now - lastFrameMs_ >= pausedFrameIntervalMs)
         {
             lastFrameMs_ = now;
             if (deviceState_ == DeviceState::PausedBySchedule)
             {
-                renderPausedIdleFrame(false);
+                if (previewActive)
+                {
+                    renderIdleUiPreviewFrame();
+                    renderer_.advanceSweep(config_.sweepStepDeg);
+                }
+                else
+                {
+                    renderPausedIdleFrame(false);
+                }
             }
             else
             {
@@ -2543,7 +2774,8 @@ void RadarApp::updateRealRadarStatus()
         return;
     }
 
-    if (settings_.api.accountMode == ApiAccountMode::OpenSkyClient &&
+    if (settings_.api.provider == ApiProvider::OpenSky &&
+        settings_.api.accountMode == ApiAccountMode::OpenSkyClient &&
         (settings_.api.openSkyClientId[0] == '\0' || settings_.api.openSkyClientSecret[0] == '\0'))
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "AUTH CONFIG");
@@ -2558,15 +2790,17 @@ void RadarApp::updateRealRadarStatus()
 
     const char *apiError = realApiUpdater_.lastError();
     const char *authError = realApiUpdater_.lastAuthError();
-    if ((apiError != nullptr && strncmp(apiError, "AUTH CONFIG", 11) == 0) ||
-        (authError != nullptr && strncmp(authError, "AUTH CONFIG", 11) == 0))
+    if (settings_.api.provider == ApiProvider::OpenSky &&
+        ((apiError != nullptr && strncmp(apiError, "AUTH CONFIG", 11) == 0) ||
+         (authError != nullptr && strncmp(authError, "AUTH CONFIG", 11) == 0)))
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "AUTH CONFIG");
         return;
     }
 
-    if ((apiError != nullptr && strncmp(apiError, "AUTH", 4) == 0) ||
-        (authError != nullptr && strncmp(authError, "AUTH", 4) == 0 && strcmp(authError, "OK") != 0))
+    if (settings_.api.provider == ApiProvider::OpenSky &&
+        ((apiError != nullptr && strncmp(apiError, "AUTH", 4) == 0) ||
+         (authError != nullptr && strncmp(authError, "AUTH", 4) == 0 && strcmp(authError, "OK") != 0)))
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "AUTH ERR");
         return;

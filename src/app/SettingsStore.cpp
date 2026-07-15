@@ -75,6 +75,9 @@ bool SettingsStore::load(UserSettings &settings)
     settings.location.centerLat = preferences_.getFloat("clat", settings.location.centerLat);
     settings.location.centerLon = preferences_.getFloat("clon", settings.location.centerLon);
     settings.location.maxRangeKm = preferences_.getFloat("range", settings.location.maxRangeKm);
+    settings.location.rangePresetsKm[0] = preferences_.getFloat("rng0", settings.location.rangePresetsKm[0]);
+    settings.location.rangePresetsKm[1] = preferences_.getFloat("rng1", settings.location.rangePresetsKm[1]);
+    settings.location.rangePresetsKm[2] = preferences_.getFloat("rng2", settings.location.rangePresetsKm[2]);
     settings.location.queryLatMin = preferences_.getFloat("qlat0", settings.location.queryLatMin);
     settings.location.queryLonMin = preferences_.getFloat("qlon0", settings.location.queryLonMin);
     settings.location.queryLatMax = preferences_.getFloat("qlat1", settings.location.queryLatMax);
@@ -156,6 +159,9 @@ bool SettingsStore::save(const UserSettings &settings)
     preferences_.putFloat("clat", settings.location.centerLat);
     preferences_.putFloat("clon", settings.location.centerLon);
     preferences_.putFloat("range", settings.location.maxRangeKm);
+    preferences_.putFloat("rng0", settings.location.rangePresetsKm[0]);
+    preferences_.putFloat("rng1", settings.location.rangePresetsKm[1]);
+    preferences_.putFloat("rng2", settings.location.rangePresetsKm[2]);
     preferences_.putFloat("qlat0", settings.location.queryLatMin);
     preferences_.putFloat("qlon0", settings.location.queryLonMin);
     preferences_.putFloat("qlat1", settings.location.queryLatMax);

@@ -1844,30 +1844,83 @@ void RadarRenderer::renderSystemStatusFrame(const char *line1,
                                             const char *line2,
                                             const char *line3)
 {
+    renderSystemStatusFrame(line1, line2, line3, UiTheme::ClassicRadar);
+}
+
+void RadarRenderer::renderSystemStatusFrame(const char *line1,
+                                            const char *line2,
+                                            const char *line3,
+                                            UiTheme theme)
+{
     if (!frameBufferReady_)
     {
         return;
     }
 
-    frame_.fillSprite(TFT_BLACK);
-    frame_.drawCircle(kCenterX, kCenterY, 116, radarGreen_);
-    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
-    frame_.drawCircle(kCenterX, kCenterY, 40, dimGreen_);
-    frame_.drawLine(kCenterX - 80, kCenterY, kCenterX + 80, kCenterY, dimGreen_);
-    frame_.drawLine(kCenterX, kCenterY - 80, kCenterX, kCenterY + 80, dimGreen_);
+    uint16_t bg = TFT_BLACK;
+    uint16_t ring = radarGreen_;
+    uint16_t dim = dimGreen_;
+    uint16_t title = sweepGreen_;
+    uint16_t text = labelGreen_;
+    const char *label = "STATUS";
+
+    if (theme == UiTheme::ModernRadar)
+    {
+        bg = tft_.color565(4, 10, 28);
+        ring = tft_.color565(24, 150, 130);
+        dim = tft_.color565(12, 70, 90);
+        title = tft_.color565(210, 235, 240);
+        text = tft_.color565(105, 205, 220);
+        label = "MODERN IDLE";
+    }
+    else if (theme == UiTheme::CyberpunkRadar)
+    {
+        bg = tft_.color565(5, 3, 18);
+        ring = tft_.color565(52, 150, 255);
+        dim = tft_.color565(62, 28, 115);
+        title = tft_.color565(255, 82, 210);
+        text = tft_.color565(86, 205, 255);
+        label = "CYBER IDLE";
+    }
+
+    frame_.fillSprite(bg);
+    frame_.drawCircle(kCenterX, kCenterY, 116, ring);
+    frame_.drawCircle(kCenterX, kCenterY, 78, dim);
+    frame_.drawCircle(kCenterX, kCenterY, 40, dim);
+
+    if (theme == UiTheme::CyberpunkRadar)
+    {
+        frame_.drawLine(34, 78, 206, 78, dim);
+        frame_.drawLine(34, 162, 206, 162, dim);
+        frame_.drawLine(64, 42, 176, 198, dim);
+    }
+    else if (theme == UiTheme::ModernRadar)
+    {
+        frame_.drawLine(kCenterX - 84, kCenterY, kCenterX + 84, kCenterY, dim);
+        frame_.drawLine(kCenterX, kCenterY - 84, kCenterX, kCenterY + 84, dim);
+        frame_.drawCircle(kCenterX, kCenterY, 4, ring);
+    }
+    else
+    {
+        frame_.drawLine(kCenterX - 80, kCenterY, kCenterX + 80, kCenterY, dim);
+        frame_.drawLine(kCenterX, kCenterY - 80, kCenterX, kCenterY + 80, dim);
+    }
 
     frame_.setTextDatum(MC_DATUM);
-    frame_.setTextColor(sweepGreen_, TFT_BLACK);
-    frame_.drawString(line1 != nullptr ? line1 : "STATUS", kCenterX, 96, 2);
+    frame_.setTextColor(text, bg);
+    frame_.drawString(label, kCenterX, 54, 1);
 
-    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.setTextColor(title, bg);
+    frame_.drawString(line1 != nullptr ? line1 : "STATUS", kCenterX, 100, 2);
+
+    frame_.setTextColor(text, bg);
     if (line2 != nullptr && line2[0] != '\0')
     {
-        frame_.drawString(line2, kCenterX, 124, 1);
+        frame_.drawString(line2, kCenterX, 130, 1);
     }
     if (line3 != nullptr && line3[0] != '\0')
     {
-        frame_.drawString(line3, kCenterX, 140, 1);
+        frame_.drawString(line3, kCenterX, 146, 1);
     }
 
     frame_.pushSprite(0, 0);
@@ -1878,23 +1931,67 @@ void RadarRenderer::renderClockFrame(const char *timeText,
                                      const char *nextRunText,
                                      const char *hintText)
 {
+    renderClockFrame(timeText, dateText, nextRunText, hintText, UiTheme::ClassicRadar);
+}
+
+void RadarRenderer::renderClockFrame(const char *timeText,
+                                     const char *dateText,
+                                     const char *nextRunText,
+                                     const char *hintText,
+                                     UiTheme theme)
+{
     if (!frameBufferReady_)
     {
         return;
     }
 
-    frame_.fillSprite(TFT_BLACK);
-    frame_.drawCircle(kCenterX, kCenterY, 116, dimGreen_);
-    frame_.drawCircle(kCenterX, kCenterY, 78, dimGreen_);
+    uint16_t bg = TFT_BLACK;
+    uint16_t ring = dimGreen_;
+    uint16_t accent = sweepGreen_;
+    uint16_t text = labelGreen_;
+    const char *label = "IDLE";
+
+    if (theme == UiTheme::ModernRadar)
+    {
+        bg = tft_.color565(4, 10, 28);
+        ring = tft_.color565(12, 70, 90);
+        accent = tft_.color565(190, 230, 235);
+        text = tft_.color565(90, 185, 210);
+        label = "MODERN";
+    }
+    else if (theme == UiTheme::CyberpunkRadar)
+    {
+        bg = tft_.color565(5, 3, 18);
+        ring = tft_.color565(60, 28, 118);
+        accent = tft_.color565(255, 82, 210);
+        text = tft_.color565(86, 205, 255);
+        label = "CYBER";
+    }
+
+    frame_.fillSprite(bg);
+    frame_.drawCircle(kCenterX, kCenterY, 116, ring);
+    frame_.drawCircle(kCenterX, kCenterY, 78, ring);
+
+    if (theme == UiTheme::ModernRadar)
+    {
+        frame_.drawLine(52, kCenterY, 188, kCenterY, ring);
+        frame_.drawLine(kCenterX, 52, kCenterX, 188, ring);
+    }
+    else if (theme == UiTheme::CyberpunkRadar)
+    {
+        frame_.drawLine(54, 76, 186, 76, ring);
+        frame_.drawLine(42, 164, 198, 164, ring);
+        frame_.drawRect(74, 88, 92, 46, ring);
+    }
 
     frame_.setTextDatum(MC_DATUM);
-    frame_.setTextColor(labelGreen_, TFT_BLACK);
-    frame_.drawString("IDLE", kCenterX, 52, 1);
+    frame_.setTextColor(text, bg);
+    frame_.drawString(label, kCenterX, 52, 1);
 
-    frame_.setTextColor(sweepGreen_, TFT_BLACK);
+    frame_.setTextColor(accent, bg);
     frame_.drawString(timeText != nullptr ? timeText : "--:--", kCenterX, 104, 4);
 
-    frame_.setTextColor(labelGreen_, TFT_BLACK);
+    frame_.setTextColor(text, bg);
     if (dateText != nullptr && dateText[0] != '\0')
     {
         frame_.drawString(dateText, kCenterX, 138, 1);

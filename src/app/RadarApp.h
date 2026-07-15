@@ -86,6 +86,7 @@ private:
     bool staSettingsOverlayVisible_ = false;
     bool wifiManagerStarted_ = false;
     bool screenSleeping_ = false;
+    bool setupPortalFromLocalMenu_ = false;
     LocalMenuPage localMenuPage_ = LocalMenuPage::Closed;
     uint8_t localMenuIndex_ = 0;
     uint8_t localMenuBrightnessIndex_ = 0;
@@ -111,6 +112,9 @@ private:
     uint32_t apiRequestCount_ = 0;
     uint32_t apiErrorCount_ = 0;
     uint32_t lastApiErrorMs_ = 0;
+    uint32_t idleUiPreviewUntilMs_ = 0;
+    uint32_t idleUiPreviewRefreshMs_ = 0;
+    uint32_t idleUiPreviewApiIntervalMs_ = 0;
 
     void beginConfiguredMode();
     void beginRadarDemo();
@@ -128,6 +132,10 @@ private:
     void renderLocalMenu();
     void renderLocalMenuPage();
     void renderCurrentDisplay();
+    bool isIdleUiPreviewActive(uint32_t now) const;
+    void startIdleUiPreview(uint32_t now, uint32_t durationMs, uint32_t refreshMs, uint32_t apiIntervalMs = 0);
+    void updateIdleRealRadarPreview(uint32_t now, bool previewActive);
+    void renderIdleUiPreviewFrame();
     uint8_t brightnessIndexFromValue(uint8_t brightness) const;
     uint8_t brightnessValueFromIndex(uint8_t index) const;
     const char *idleDisplayMenuName(ScheduleIdleDisplayMode mode) const;

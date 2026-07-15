@@ -65,6 +65,7 @@ struct LocationSettings
     float centerLat;
     float centerLon;
     float maxRangeKm;
+    float rangePresetsKm[3];
     float queryLatMin;
     float queryLonMin;
     float queryLatMax;

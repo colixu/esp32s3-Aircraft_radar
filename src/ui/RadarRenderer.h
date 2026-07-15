@@ -50,10 +50,19 @@ public:
     void renderSystemStatusFrame(const char *line1,
                                  const char *line2,
                                  const char *line3);
+    void renderSystemStatusFrame(const char *line1,
+                                 const char *line2,
+                                 const char *line3,
+                                 UiTheme theme);
     void renderClockFrame(const char *timeText,
                           const char *dateText,
                           const char *nextRunText,
                           const char *hintText);
+    void renderClockFrame(const char *timeText,
+                          const char *dateText,
+                          const char *nextRunText,
+                          const char *hintText,
+                          UiTheme theme);
     void renderLocalMenuFrame(const char *title,
                               const char *const *items,
                               uint8_t itemCount,

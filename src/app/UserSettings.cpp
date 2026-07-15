@@ -8,6 +8,10 @@
 
 namespace
 {
+    constexpr uint32_t kAdsbFiDefaultIntervalMs = 10000;
+    constexpr uint32_t kAdsbFiMinIntervalMs = 1000;
+    constexpr uint32_t kMaxManualIntervalMs = 3600000;
+
     template <typename T>
     T clampValue(T value, T minValue, T maxValue)
     {
@@ -82,6 +86,27 @@ namespace
     {
         return mode == ApiAccountMode::Anonymous ? 10000 : 5000;
     }
+
+    void sanitizeRangePresets(LocationSettings &location)
+    {
+        for (uint8_t i = 0; i < 3; ++i)
+        {
+            location.rangePresetsKm[i] = clampValue(location.rangePresetsKm[i], 5.0f, 300.0f);
+        }
+
+        for (uint8_t i = 0; i < 2; ++i)
+        {
+            for (uint8_t j = i + 1; j < 3; ++j)
+            {
+                if (location.rangePresetsKm[j] < location.rangePresetsKm[i])
+                {
+                    const float temp = location.rangePresetsKm[i];
+                    location.rangePresetsKm[i] = location.rangePresetsKm[j];
+                    location.rangePresetsKm[j] = temp;
+                }
+            }
+        }
+    }
 }
 
 void loadDefaultUserSettings(UserSettings &settings)
@@ -99,19 +124,22 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.location.centerLat = config.radarCenterLat;
     settings.location.centerLon = config.radarCenterLon;
     settings.location.maxRangeKm = config.maxRangeKm;
+    settings.location.rangePresetsKm[0] = 30.0f;
+    settings.location.rangePresetsKm[1] = 60.0f;
+    settings.location.rangePresetsKm[2] = 120.0f;
     settings.location.queryLatMin = config.openSkyLamin;
     settings.location.queryLonMin = config.openSkyLomin;
     settings.location.queryLatMax = config.openSkyLamax;
     settings.location.queryLonMax = config.openSkyLomax;
 
-    settings.api.provider = ApiProvider::OpenSky;
+    settings.api.provider = ApiProvider::AdsbFi;
     settings.api.accountMode = ApiAccountMode::Anonymous;
     settings.api.refreshPolicy = RefreshPolicy::ManualInterval;
     settings.api.dailyCreditBudget = 400;
     settings.api.creditReserveRatio = 0.90f;
     settings.api.requestCostCredits = 1.0f;
-    settings.api.manualRequestIntervalMs = config.apiRequestIntervalMs;
-    settings.api.minUsefulIntervalMs = 10000;
+    settings.api.manualRequestIntervalMs = kAdsbFiDefaultIntervalMs;
+    settings.api.minUsefulIntervalMs = kAdsbFiMinIntervalMs;
 
     settings.schedule.enabled = false;
     settings.schedule.startMinutesOfDay = 480;
@@ -157,6 +185,7 @@ void sanitizeUserSettings(UserSettings &settings)
     settings.location.centerLat = clampValue(settings.location.centerLat, -90.0f, 90.0f);
     settings.location.centerLon = clampValue(settings.location.centerLon, -180.0f, 180.0f);
     settings.location.maxRangeKm = clampValue(settings.location.maxRangeKm, 5.0f, 300.0f);
+    sanitizeRangePresets(settings.location);
 
     settings.location.queryLatMin = clampValue(settings.location.queryLatMin, -90.0f, 90.0f);
     settings.location.queryLatMax = clampValue(settings.location.queryLatMax, -90.0f, 90.0f);
@@ -182,7 +211,7 @@ void sanitizeUserSettings(UserSettings &settings)
     }
     if (!isValidApiProvider(settings.api.provider))
     {
-        settings.api.provider = ApiProvider::OpenSky;
+        settings.api.provider = ApiProvider::AdsbFi;
     }
     if (!isValidApiAccountMode(settings.api.accountMode))
     {
@@ -217,14 +246,31 @@ void sanitizeUserSettings(UserSettings &settings)
     settings.schedule.startMinutesOfDay = clampValue<int16_t>(settings.schedule.startMinutesOfDay, 0, 1439);
     settings.schedule.endMinutesOfDay = clampValue<int16_t>(settings.schedule.endMinutesOfDay, 0, 1439);
 
-    settings.api.dailyCreditBudget = max<uint32_t>(settings.api.dailyCreditBudget, 1);
-    settings.api.dailyCreditBudget = defaultBudgetFor(settings.api.accountMode, settings.api.dailyCreditBudget);
-    settings.api.creditReserveRatio = clampValue(settings.api.creditReserveRatio, 0.1f, 1.0f);
-    settings.api.requestCostCredits = max(0.1f, settings.api.requestCostCredits);
-    settings.api.minUsefulIntervalMs = max<uint32_t>(settings.api.minUsefulIntervalMs,
-                                                     defaultMinIntervalFor(settings.api.accountMode));
-    settings.api.manualRequestIntervalMs = max<uint32_t>(settings.api.manualRequestIntervalMs,
-                                                         settings.api.minUsefulIntervalMs);
+    if (settings.api.provider == ApiProvider::AdsbFi)
+    {
+        settings.api.accountMode = ApiAccountMode::Anonymous;
+        settings.api.refreshPolicy = RefreshPolicy::ManualInterval;
+        settings.api.dailyCreditBudget = max<uint32_t>(settings.api.dailyCreditBudget, 1);
+        settings.api.creditReserveRatio = clampValue(settings.api.creditReserveRatio, 0.1f, 1.0f);
+        settings.api.requestCostCredits = max(0.1f, settings.api.requestCostCredits);
+        settings.api.minUsefulIntervalMs = max<uint32_t>(settings.api.minUsefulIntervalMs, kAdsbFiMinIntervalMs);
+        settings.api.manualRequestIntervalMs = clampValue<uint32_t>(settings.api.manualRequestIntervalMs,
+                                                                    settings.api.minUsefulIntervalMs,
+                                                                    kMaxManualIntervalMs);
+    }
+    else
+    {
+        settings.api.dailyCreditBudget = max<uint32_t>(settings.api.dailyCreditBudget, 1);
+        settings.api.dailyCreditBudget = defaultBudgetFor(settings.api.accountMode, settings.api.dailyCreditBudget);
+        settings.api.creditReserveRatio = clampValue(settings.api.creditReserveRatio, 0.1f, 1.0f);
+        settings.api.requestCostCredits = max(0.1f, settings.api.requestCostCredits);
+        settings.api.minUsefulIntervalMs = max<uint32_t>(settings.api.minUsefulIntervalMs,
+                                                         defaultMinIntervalFor(settings.api.accountMode));
+        settings.api.manualRequestIntervalMs = clampValue<uint32_t>(settings.api.manualRequestIntervalMs,
+                                                                    settings.api.minUsefulIntervalMs,
+                                                                    kMaxManualIntervalMs);
+    }
+
     settings.api.computedRequestIntervalMs = computeRecommendedRequestIntervalMs(settings);
 }
 
@@ -308,6 +354,11 @@ int16_t computeNextScheduleStartMinutes(const ScheduleSettings &schedule, int16_
 
 uint32_t computeRecommendedRequestIntervalMs(const UserSettings &settings)
 {
+    if (settings.api.provider == ApiProvider::AdsbFi)
+    {
+        return max<uint32_t>(settings.api.manualRequestIntervalMs, kAdsbFiMinIntervalMs);
+    }
+
     const uint32_t activeSeconds = computeActiveSecondsPerDay(settings.schedule);
     const float usableCredits = static_cast<float>(settings.api.dailyCreditBudget) *
                                 settings.api.creditReserveRatio;
@@ -323,6 +374,11 @@ uint32_t computeRecommendedRequestIntervalMs(const UserSettings &settings)
 
 uint32_t activeRequestIntervalMs(const UserSettings &settings)
 {
+    if (settings.api.provider == ApiProvider::AdsbFi)
+    {
+        return max<uint32_t>(settings.api.manualRequestIntervalMs, kAdsbFiMinIntervalMs);
+    }
+
     if (settings.api.refreshPolicy == RefreshPolicy::ManualInterval)
     {
         return settings.api.manualRequestIntervalMs;
@@ -337,10 +393,13 @@ void printUserSettings(const UserSettings &settings)
     DebugLog::printf("  configured=%u ssid_set=%u\r\n",
                      settings.wifi.configured ? 1 : 0,
                      settings.wifi.ssid[0] != '\0' ? 1 : 0);
-    DebugLog::printf("  center=%.5f,%.5f range=%.0fkm\r\n",
+    DebugLog::printf("  center=%.5f,%.5f range=%.0fkm presets=%.0f/%.0f/%.0fkm\r\n",
                      settings.location.centerLat,
                      settings.location.centerLon,
-                     settings.location.maxRangeKm);
+                     settings.location.maxRangeKm,
+                     settings.location.rangePresetsKm[0],
+                     settings.location.rangePresetsKm[1],
+                     settings.location.rangePresetsKm[2]);
     DebugLog::printf("  api=%s account=%s client_id_set=%u client_secret_set=%u\r\n",
                      apiProviderName(settings.api.provider),
                      apiAccountModeName(settings.api.accountMode),
@@ -414,7 +473,7 @@ const char *apiProviderName(ApiProvider provider)
         case ApiProvider::OpenSky:
             return "OpenSky";
         case ApiProvider::AdsbFi:
-            return "AdsbFi";
+            return "adsb.fi";
         case ApiProvider::AirplanesLive:
             return "AirplanesLive";
         case ApiProvider::AdsbLol:
