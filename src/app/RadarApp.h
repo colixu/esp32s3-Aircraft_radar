@@ -108,6 +108,7 @@ private:
     uint32_t lastTimeSyncLogMs_ = 0;
     uint32_t lastIdleDisplayRenderMs_ = 0;
     uint32_t lastSystemStatusLogMs_ = 0;
+    uint32_t lastTemperatureLogMs_ = 0;
     uint32_t wifiLostSinceMs_ = 0;
     uint32_t currentRealApiIntervalMs_ = 0;
     uint32_t apiRequestCount_ = 0;
@@ -170,6 +171,7 @@ private:
     void printDeviceStateStatus();
     SystemStatus getSystemStatus() const;
     void updateLongRunStatusLog(uint32_t now);
+    void updateTemperatureLog(uint32_t now);
     void printApiAuthStatus();
     void clearAuthToken();
     void enterSetupPortal(const char *reason);

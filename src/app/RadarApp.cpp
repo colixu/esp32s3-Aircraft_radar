@@ -1,6 +1,7 @@
 #include "RadarApp.h"
 
 #include <WiFi.h>
+#include <driver/temp_sensor.h>
 #include <math.h>
 #include <string.h>
 
@@ -12,6 +13,7 @@ namespace
 {
     constexpr uint32_t kScheduleCheckIntervalMs = 5000;
     constexpr uint32_t kSystemStatusLogIntervalMs = 60000;
+    constexpr uint32_t kTemperatureLogIntervalMs = 1000;
     constexpr uint32_t kLocalMenuTimeoutMs = 30000;
     constexpr uint32_t kLocalMenuOpenLongGuardMs = 8000;
     constexpr uint32_t kLocalMenuRefreshMs = 500;
@@ -99,6 +101,79 @@ namespace
                 return ScheduleIdleDisplayMode::Clock;
         }
     }
+
+    bool startInternalTemperatureSensor()
+    {
+        temp_sensor_config_t config = TSENS_CONFIG_DEFAULT();
+
+        esp_err_t result = temp_sensor_set_config(config);
+        if (result != ESP_OK)
+        {
+            DebugLog::printf("ESP32-S3 internal temperature sensor config failed: %d\r\n", result);
+            return false;
+        }
+
+        result = temp_sensor_start();
+        if (result != ESP_OK)
+        {
+            DebugLog::printf("ESP32-S3 internal temperature sensor start failed: %d\r\n", result);
+            return false;
+        }
+
+        temp_sensor_config_t appliedConfig = TSENS_CONFIG_DEFAULT();
+        temp_sensor_get_config(&appliedConfig);
+        DebugLog::printf("ESP32-S3 internal temperature sensor started: default dac=%d clk_div=%u\r\n",
+                         static_cast<int>(appliedConfig.dac_offset),
+                         appliedConfig.clk_div);
+        return true;
+    }
+
+    float readInternalTemperatureC()
+    {
+        static bool sensorStarted = false;
+        static bool sensorFailed = false;
+        static uint8_t discardedSampleCount = 0;
+        static uint32_t sensorStartedMs = 0;
+        float temperatureC = NAN;
+
+        if (sensorFailed)
+        {
+            return NAN;
+        }
+
+        if (!sensorStarted)
+        {
+            if (!startInternalTemperatureSensor())
+            {
+                sensorFailed = true;
+                return NAN;
+            }
+
+            sensorStarted = true;
+            sensorStartedMs = millis();
+        }
+
+        if (millis() - sensorStartedMs < 1000)
+        {
+            return NAN;
+        }
+
+        if (discardedSampleCount < 5)
+        {
+            temp_sensor_read_celsius(&temperatureC);
+            ++discardedSampleCount;
+            return NAN;
+        }
+
+        const esp_err_t result = temp_sensor_read_celsius(&temperatureC);
+        if (result != ESP_OK)
+        {
+            DebugLog::printf("ESP32-S3 internal temperature default read failed: %d\r\n", result);
+            return NAN;
+        }
+
+        return temperatureC;
+    }
 }
 
 RadarApp::RadarApp() :
@@ -161,6 +236,7 @@ void RadarApp::update()
 {
     const uint32_t now = millis();
     updateInput();
+    updateTemperatureLog(now);
     updateLongRunStatusLog(now);
 
     if (debugMode_ == DebugMode::UiLab)
@@ -2089,6 +2165,23 @@ void RadarApp::updateLongRunStatusLog(uint32_t now)
                      static_cast<unsigned long>(status.apiErrorCount),
                      status.aircraftCount,
                      uiThemeName(status.uiTheme));
+}
+
+void RadarApp::updateTemperatureLog(uint32_t now)
+{
+    if (lastTemperatureLogMs_ != 0 && now - lastTemperatureLogMs_ < kTemperatureLogIntervalMs)
+    {
+        return;
+    }
+
+    lastTemperatureLogMs_ = now;
+    const float temperatureC = readInternalTemperatureC();
+    if (isnan(temperatureC))
+    {
+        DebugLog::println("ESP32-S3 internal temperature default: NAN");
+        return;
+    }
+    DebugLog::printf("ESP32-S3 internal temperature default: %.1f C\r\n", temperatureC);
 }
 
 void RadarApp::printApiAuthStatus()
