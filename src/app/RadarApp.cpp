@@ -88,6 +88,13 @@ namespace
                event == InputEvent::KeyDownDouble;
     }
 
+    bool isBootButtonInputEvent(InputEvent event)
+    {
+        return event == InputEvent::BootButtonShort ||
+               event == InputEvent::BootButtonDouble ||
+               event == InputEvent::BootButtonLong;
+    }
+
     ScheduleIdleDisplayMode previousIdleDisplayMode(ScheduleIdleDisplayMode mode)
     {
         switch (mode)
@@ -287,6 +294,71 @@ void RadarApp::update()
     updateRadarDemo(now);
 }
 
+void RadarApp::idle()
+{
+    const uint32_t delayMs = computeIdleDelayMs();
+
+    if (settings_.system.serialDebug && delayMs != lastIdleDelayMs_)
+    {
+        lastIdleDelayMs_ = delayMs;
+        DebugLog::printf("[Idle] delay=%lums state=%s screenSleep=%u menu=%u\r\n",
+                         static_cast<unsigned long>(delayMs),
+                         deviceStateName(deviceState_),
+                         screenSleeping_ ? 1 : 0,
+                         localMenuPage_ != LocalMenuPage::Closed ? 1 : 0);
+    }
+
+    if (delayMs > 0)
+    {
+        delay(delayMs);
+    }
+}
+
+uint32_t RadarApp::computeIdleDelayMs() const
+{
+    if (screenSleeping_)
+    {
+        return 50;
+    }
+
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        return 5;
+    }
+
+    if (deviceState_ == DeviceState::SetupPortal)
+    {
+        return 5;
+    }
+
+    if (configPortal_.isRunning() && configPortal_.mode() == ConfigPortalMode::StaSettings)
+    {
+        return 2;
+    }
+
+    if (deviceState_ == DeviceState::PausedBySchedule)
+    {
+        return 25;
+    }
+
+    if (config_.appMode == AppMode::RealRadar)
+    {
+        return 2;
+    }
+
+    if (config_.appMode == AppMode::ApiTest)
+    {
+        return 2;
+    }
+
+    if (config_.appMode == AppMode::RadarDemo)
+    {
+        return 5;
+    }
+
+    return 1;
+}
+
 void RadarApp::beginRadarDemo()
 {
     setDeviceState(DeviceState::Running);
@@ -388,6 +460,12 @@ void RadarApp::handleInputEvent(InputEvent event)
     if (isButtonInputEvent(event))
     {
         handleButtonInputEvent(event);
+        return;
+    }
+
+    if (isBootButtonInputEvent(event))
+    {
+        handleBootButtonInputEvent(event);
         return;
     }
 
@@ -658,6 +736,66 @@ void RadarApp::handleButtonInputEvent(InputEvent event)
     }
 }
 
+void RadarApp::handleBootButtonInputEvent(InputEvent event)
+{
+    if (screenSleeping_)
+    {
+        wakeScreenFromSleep();
+        return;
+    }
+
+    if (localMenuPage_ != LocalMenuPage::Closed)
+    {
+        DebugLog::println("[Input] BOOT ignored: local menu is open.");
+        return;
+    }
+
+    switch (event)
+    {
+        case InputEvent::BootButtonShort:
+            if (hasActiveOverlay())
+            {
+                DebugLog::println("[Input] BOOT short ignored: settings view is active.");
+                return;
+            }
+
+            DebugLog::println("[Input] BOOT short: next UI theme");
+            switchUiTheme();
+            if (deviceState_ == DeviceState::PausedBySchedule)
+            {
+                startIdleUiPreview(millis(), kIdleThemePreviewMs, config_.frameIntervalMs);
+            }
+            break;
+
+        case InputEvent::BootButtonDouble:
+            if (hasActiveOverlay())
+            {
+                DebugLog::println("[Input] BOOT double ignored: settings view is active.");
+                return;
+            }
+
+            DebugLog::println("[Input] BOOT double: next range");
+            switchRange();
+            if (deviceState_ == DeviceState::PausedBySchedule)
+            {
+                startIdleUiPreview(millis(),
+                                   kIdleRangePreviewMs,
+                                   kIdleRangePreviewRefreshMs,
+                                   kIdleRangePreviewApiIntervalMs);
+            }
+            break;
+
+        case InputEvent::BootButtonLong:
+            DebugLog::println("[Input] BOOT long: open settings QR");
+            openSettingsEntryFromBootButton();
+            break;
+
+        case InputEvent::None:
+        default:
+            break;
+    }
+}
+
 void RadarApp::wakeScreenFromSleep()
 {
     screenSleeping_ = false;
@@ -688,6 +826,19 @@ void RadarApp::wakeScreenFromSleep()
     {
         renderApiTestScreen();
     }
+}
+
+void RadarApp::openSettingsEntryFromBootButton()
+{
+    if (wifi_.isConnected())
+    {
+        showStaSettingsOverlay();
+        return;
+    }
+
+    screenSleeping_ = false;
+    setupPortalFromLocalMenu_ = true;
+    enterSetupPortal("BOOT button");
 }
 
 void RadarApp::openLocalMenu()

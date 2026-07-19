@@ -54,6 +54,7 @@ public:
 
     void begin();
     void update();
+    void idle();
 
 private:
     AppConfig config_;
@@ -109,6 +110,7 @@ private:
     uint32_t lastIdleDisplayRenderMs_ = 0;
     uint32_t lastSystemStatusLogMs_ = 0;
     uint32_t lastTemperatureLogMs_ = 0;
+    uint32_t lastIdleDelayMs_ = UINT32_MAX;
     uint32_t wifiLostSinceMs_ = 0;
     uint32_t currentRealApiIntervalMs_ = 0;
     uint32_t apiRequestCount_ = 0;
@@ -119,13 +121,16 @@ private:
     uint32_t idleUiPreviewApiIntervalMs_ = 0;
 
     void beginConfiguredMode();
+    uint32_t computeIdleDelayMs() const;
     void beginRadarDemo();
     void beginApiTest();
     void beginRealRadar();
     void updateInput();
     void handleInputEvent(InputEvent event);
     void handleButtonInputEvent(InputEvent event);
+    void handleBootButtonInputEvent(InputEvent event);
     void wakeScreenFromSleep();
+    void openSettingsEntryFromBootButton();
     void openLocalMenu();
     void closeLocalMenu(bool restoreDisplay = true);
     void updateLocalMenu(uint32_t now);

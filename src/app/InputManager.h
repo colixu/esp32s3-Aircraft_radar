@@ -26,6 +26,10 @@ private:
     static constexpr uint8_t kLineBufferSize = 128;
 
     int buttonPin_ = -1;
+    uint32_t inputStartedMs_ = 0;
+    uint32_t bootRawChangedMs_ = 0;
+    uint32_t bootPressStartedMs_ = 0;
+    uint32_t bootPendingClickMs_ = 0;
     InputEvent eventQueue_[kEventQueueSize] = {};
     uint8_t eventHead_ = 0;
     uint8_t eventTail_ = 0;
@@ -34,6 +38,10 @@ private:
     uint8_t lineLength_ = 0;
     UiTuningCommand pendingUiCommand_ = {};
     bool uiCommandPending_ = false;
+    bool bootLastRawPressed_ = false;
+    bool bootStablePressed_ = false;
+    bool bootLongFired_ = false;
+    bool bootPendingClick_ = false;
 
     void pushEvent(InputEvent event);
     void handleSerialInput(char command, Stream &serial);
@@ -42,4 +50,5 @@ private:
     bool parseVirtualButtonCommand(char *line);
     bool parseUiTuningCommand(char *line);
     void updateButtons();
+    void updateBootButton();
 };

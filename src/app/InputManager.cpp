@@ -8,6 +8,11 @@
 
 namespace
 {
+    constexpr uint32_t kBootDebounceMs = 30;
+    constexpr uint32_t kBootDoubleClickWindowMs = 350;
+    constexpr uint32_t kBootLongPressMs = 900;
+    constexpr uint32_t kBootIgnoreAfterStartupMs = 500;
+
     bool serialDebugDisabledNotified = false;
 
     bool isIgnoredSerialChar(char command)
@@ -65,6 +70,10 @@ namespace
 void InputManager::begin(const UserSettings &settings)
 {
     buttonPin_ = settings.system.uiButtonPin;
+    inputStartedMs_ = millis();
+    bootRawChangedMs_ = inputStartedMs_;
+    bootPressStartedMs_ = 0;
+    bootPendingClickMs_ = 0;
     eventHead_ = 0;
     eventTail_ = 0;
     eventCount_ = 0;
@@ -72,11 +81,19 @@ void InputManager::begin(const UserSettings &settings)
     uiCommandPending_ = false;
     memset(lineBuffer_, 0, sizeof(lineBuffer_));
     memset(&pendingUiCommand_, 0, sizeof(pendingUiCommand_));
+    bootLastRawPressed_ = false;
+    bootStablePressed_ = false;
+    bootLongFired_ = false;
+    bootPendingClick_ = false;
 
     if (buttonPin_ >= 0)
     {
         pinMode(buttonPin_, INPUT_PULLUP);
     }
+
+#if ENABLE_SINGLE_BOOT_BUTTON
+    pinMode(USER_BOOT_BUTTON_PIN, INPUT_PULLUP);
+#endif
 }
 
 void InputManager::update()
@@ -540,6 +557,88 @@ bool InputManager::parseUiTuningCommand(char *line)
 
 void InputManager::updateButtons()
 {
+#if ENABLE_SINGLE_BOOT_BUTTON
+    updateBootButton();
+#endif
+}
+
+void InputManager::updateBootButton()
+{
+#if ENABLE_SINGLE_BOOT_BUTTON
+    const uint32_t now = millis();
+    const bool rawPressed =
+#if USER_BOOT_BUTTON_ACTIVE_LOW
+        digitalRead(USER_BOOT_BUTTON_PIN) == LOW;
+#else
+        digitalRead(USER_BOOT_BUTTON_PIN) == HIGH;
+#endif
+
+    if (now - inputStartedMs_ < kBootIgnoreAfterStartupMs)
+    {
+        bootLastRawPressed_ = rawPressed;
+        bootStablePressed_ = rawPressed;
+        bootRawChangedMs_ = now;
+        bootPressStartedMs_ = rawPressed ? now : 0;
+        bootLongFired_ = false;
+        bootPendingClick_ = false;
+        return;
+    }
+
+    if (rawPressed != bootLastRawPressed_)
+    {
+        bootLastRawPressed_ = rawPressed;
+        bootRawChangedMs_ = now;
+    }
+
+    if (now - bootRawChangedMs_ >= kBootDebounceMs &&
+        rawPressed != bootStablePressed_)
+    {
+        bootStablePressed_ = rawPressed;
+
+        if (bootStablePressed_)
+        {
+            bootPressStartedMs_ = now;
+            bootLongFired_ = false;
+        }
+        else
+        {
+            if (!bootLongFired_)
+            {
+                if (bootPendingClick_ &&
+                    now - bootPendingClickMs_ <= kBootDoubleClickWindowMs)
+                {
+                    bootPendingClick_ = false;
+                    pushEvent(InputEvent::BootButtonDouble);
+                }
+                else
+                {
+                    bootPendingClick_ = true;
+                    bootPendingClickMs_ = now;
+                }
+            }
+
+            bootPressStartedMs_ = 0;
+            bootLongFired_ = false;
+        }
+    }
+
+    if (bootStablePressed_ &&
+        !bootLongFired_ &&
+        bootPressStartedMs_ != 0 &&
+        now - bootPressStartedMs_ >= kBootLongPressMs)
+    {
+        bootLongFired_ = true;
+        bootPendingClick_ = false;
+        pushEvent(InputEvent::BootButtonLong);
+    }
+
+    if (bootPendingClick_ &&
+        now - bootPendingClickMs_ > kBootDoubleClickWindowMs)
+    {
+        bootPendingClick_ = false;
+        pushEvent(InputEvent::BootButtonShort);
+    }
+#endif
     // Future hardware mapping:
     // SETUP short press -> ShowStaSettings
     // SETUP long press  -> EnterApSetup

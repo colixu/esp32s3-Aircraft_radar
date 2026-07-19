@@ -30,6 +30,10 @@ enum class InputEvent
     KeyDownLong,
     KeyDownDouble,
 
+    BootButtonShort,
+    BootButtonDouble,
+    BootButtonLong,
+
     SaveSettings,
     LoadSettings,
     ResetDefaults,
