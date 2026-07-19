@@ -48,6 +48,8 @@ bool ConfigPortal::beginApSetup(UserSettings *settings, SettingsStore *settingsS
     WiFi.mode(WIFI_OFF);
     delay(150);
     WiFi.mode(WIFI_AP);
+    WiFi.setTxPower(WIFI_POWER_15dBm);
+    DebugLog::printf("ConfigPortal AP TX power set to 15 dBm (%d)\r\n", static_cast<int>(WiFi.getTxPower()));
     delay(50);
     const bool apStarted = WiFi.softAP(apSsid_, kApPassword);
     snprintf(ipAddress_, sizeof(ipAddress_), "%s", WiFi.softAPIP().toString().c_str());

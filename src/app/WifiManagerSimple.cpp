@@ -24,7 +24,9 @@ void WifiManagerSimple::begin(const char *ssid, const char *password)
     WiFi.mode(WIFI_OFF);
     delay(150);
     WiFi.mode(WIFI_STA);
+    WiFi.setTxPower(WIFI_POWER_15dBm);
     WiFi.setSleep(false);
+    DebugLog::printf("WiFi TX power set to 15 dBm (%d)\r\n", static_cast<int>(WiFi.getTxPower()));
     started_ = false;
     wasConnected_ = false;
     startConnect(millis());

@@ -81,9 +81,14 @@ void InputManager::begin(const UserSettings &settings)
 
 void InputManager::update()
 {
+    while (Serial.available() > 0)
+    {
+        handleSerialInput(static_cast<char>(Serial.read()), Serial);
+    }
+
     while (Serial0.available() > 0)
     {
-        handleSerialInput(static_cast<char>(Serial0.read()));
+        handleSerialInput(static_cast<char>(Serial0.read()), Serial0);
     }
 
     updateButtons();
@@ -135,7 +140,7 @@ void InputManager::pushEvent(InputEvent event)
     ++eventCount_;
 }
 
-void InputManager::handleSerialInput(char command)
+void InputManager::handleSerialInput(char command, Stream &serial)
 {
     if (lineLength_ > 0)
     {
@@ -161,9 +166,16 @@ void InputManager::handleSerialInput(char command)
         return;
     }
 
-    if ((command == 's' || command == 'S') && Serial0.available() > 0)
+    if (command == 's' || command == 'S')
     {
-        const int next = Serial0.peek();
+        if (serial.available() == 0)
+        {
+            lineBuffer_[0] = command;
+            lineLength_ = 1;
+            return;
+        }
+
+        const int next = serial.peek();
         if (next == 'e' || next == 'E')
         {
             lineBuffer_[0] = command;
@@ -172,9 +184,16 @@ void InputManager::handleSerialInput(char command)
         }
     }
 
-    if ((command == 'b' || command == 'B') && Serial0.available() > 0)
+    if (command == 'b' || command == 'B')
     {
-        const int next = Serial0.peek();
+        if (serial.available() == 0)
+        {
+            lineBuffer_[0] = command;
+            lineLength_ = 1;
+            return;
+        }
+
+        const int next = serial.peek();
         if (next == 't' || next == 'T' ||
             next == 'u' || next == 'U' ||
             next == 'd' || next == 'D')
@@ -353,6 +372,12 @@ void InputManager::handleSerialLine()
 
     if (parseUiTuningCommand(lineBuffer_))
     {
+        return;
+    }
+
+    if (lineLength_ == 1)
+    {
+        handleSerialCommand(lineBuffer_[0]);
         return;
     }
 

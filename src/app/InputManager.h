@@ -36,7 +36,7 @@ private:
     bool uiCommandPending_ = false;
 
     void pushEvent(InputEvent event);
-    void handleSerialInput(char command);
+    void handleSerialInput(char command, Stream &serial);
     void handleSerialCommand(char command);
     void handleSerialLine();
     bool parseVirtualButtonCommand(char *line);
