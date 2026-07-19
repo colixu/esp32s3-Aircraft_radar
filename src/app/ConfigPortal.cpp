@@ -308,6 +308,38 @@ void ConfigPortal::handleNotFound()
     server_.send(302, "text/plain", "");
 }
 
+void ConfigPortal::sendStatusPanel(uint32_t intervalMs)
+{
+    if (settings_ == nullptr)
+    {
+        return;
+    }
+
+    char value[40];
+    const UserSettings &settings = *settings_;
+    write("<fieldset><legend>");
+    write(text("Current Status", "当前状态"));
+    write("</legend><p>");
+    write(text("Mode", "模式"));
+    write(": ");
+    write(mode_ == ConfigPortalMode::ApSetup ? text("AP Setup", "AP 配置") : text("STA Settings", "局域网设置"));
+    write(" / WiFi: ");
+    write(WiFi.status() == WL_CONNECTED ? text("Connected", "已连接") :
+                                           (settings.wifi.configured ? text("Configured", "已配置") : text("Not configured", "未配置")));
+    write("</p><p>IP: ");
+    write(mode_ == ConfigPortalMode::StaSettings ? staIpAddress_ : ipAddress_);
+    write("</p><p>");
+    write(text("Data Source", "数据源"));
+    write(": ");
+    write(apiProviderName(settings.api.provider));
+    write(" / ");
+    write(text("Refresh", "刷新"));
+    write(": ");
+    snprintf(value, sizeof(value), "%.1fs", static_cast<float>(intervalMs) / 1000.0f);
+    write(value);
+    write("</p></fieldset>");
+}
+
 void ConfigPortal::renderSimplePage()
 {
     if (settings_ == nullptr)
@@ -340,21 +372,25 @@ void ConfigPortal::renderSimplePage()
     write("</h1><p>");
     if (mode_ == ConfigPortalMode::ApSetup)
     {
-        write(text("You are connected to the device setup WiFi. Save WiFi settings and restart.",
-                   "请连接设备配置 WiFi，保存 WiFi 后重启设备。"));
-        write("</p><p>AP: ");
-        write(apSsid_);
-        write(" / IP: ");
-        write(ipAddress_);
+        if (!settings.wifi.configured)
+        {
+            write(text("First setup: enter your WiFi, radar location, data source, and display settings. Save settings, then restart the device so it can connect to your WiFi.",
+                       "首次配置：请填写 WiFi、雷达位置、数据源和显示设置。保存后请重启设备，设备会尝试连接你的 WiFi。"));
+        }
+        else
+        {
+            write(text("Setup portal is active. Save changes, then restart the device to fully apply WiFi and startup settings.",
+                       "当前处于配置页面。修改后请保存设置，并重启设备以完整应用 WiFi 和启动相关设置。"));
+        }
     }
     else
     {
-        write(text("You are connected through your home WiFi. You can update settings here.",
-                   "当前通过家庭 WiFi 访问，可以在这里修改设置。"));
-        write("</p><p>IP: ");
-        write(staIpAddress_);
+        write(text("Update settings here. Display and filter values are saved immediately; WiFi and startup behavior should be verified after restart.",
+                   "可在这里修改设备设置。显示和过滤参数会立即保存；WiFi 和启动相关配置建议重启后确认。"));
     }
-    write("</p><form method=\"POST\" action=\"/saveSimple\">");
+    write("</p>");
+    sendStatusPanel(intervalMs);
+    write("<form method=\"POST\" action=\"/saveSimple\">");
     sendHiddenLanguage();
 
     write("<fieldset><legend>WiFi</legend>");
@@ -363,7 +399,20 @@ void ConfigPortal::renderSimplePage()
                                      text("WiFi is not configured yet.", "WiFi 尚未配置。"));
     write("</p>");
     sendTextInput(text("WiFi SSID", "WiFi 名称"), "wifi_ssid", settings.wifi.ssid, false);
-    sendTextInput(text("WiFi Password", "WiFi 密码"), "wifi_password", "", true);
+    write("<label>");
+    write(text("WiFi Password", "WiFi 密码"));
+    write("<span class=\"passwordRow\"><input id=\"wifiPassword\" name=\"wifi_password\" type=\"password\" value=\"");
+    write(settings.wifi.configured ? settings.wifi.password : "");
+    write("\" placeholder=\"");
+    write(settings.wifi.configured ? text("Password hidden", "密码已隐藏") : text("WiFi password", "WiFi 密码"));
+    write("\"><button type=\"button\" onclick=\"toggleWifiPassword()\" id=\"wifiPasswordToggle\">");
+    write(text("Show", "查看"));
+    write("</button></span></label><p class=\"hint\">");
+    write(settings.wifi.configured ? text("Saved password is hidden by default. Tap Show to view or edit it.",
+                                          "已保存的密码默认隐藏。点击查看可以显示或修改。") :
+                                     text("Enter a WiFi password before saving.",
+                                          "保存前请输入 WiFi 密码。"));
+    write("</p>");
     write("</fieldset>");
 
     write("<fieldset><legend>");
@@ -379,19 +428,19 @@ void ConfigPortal::renderSimplePage()
     write("<label>");
     write(text("Display range", "显示范围"));
     write("<select name=\"displayRangePreset\">");
-    snprintf(value, sizeof(value), "Preset 1 - %.0f km", settings.location.rangePresetsKm[0]);
+    snprintf(value, sizeof(value), text("Preset 1 - %.0f km", "档位 1 - %.0f km"), settings.location.rangePresetsKm[0]);
     sendSelectOption("0", value, selectedRangePreset == 0);
-    snprintf(value, sizeof(value), "Preset 2 - %.0f km", settings.location.rangePresetsKm[1]);
+    snprintf(value, sizeof(value), text("Preset 2 - %.0f km", "档位 2 - %.0f km"), settings.location.rangePresetsKm[1]);
     sendSelectOption("1", value, selectedRangePreset == 1);
-    snprintf(value, sizeof(value), "Preset 3 - %.0f km", settings.location.rangePresetsKm[2]);
+    snprintf(value, sizeof(value), text("Preset 3 - %.0f km", "档位 3 - %.0f km"), settings.location.rangePresetsKm[2]);
     sendSelectOption("2", value, selectedRangePreset == 2);
     write("</select></label>");
     snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[0]);
-    sendNumberInput(text("Range preset 1 km", "范围档位 1 km"), "rangePreset1Km", value, "0.1");
+    sendKmInput(text("Range preset 1", "档位 1"), "rangePreset1Km", value, "0.1");
     snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[1]);
-    sendNumberInput(text("Range preset 2 km", "范围档位 2 km"), "rangePreset2Km", value, "0.1");
+    sendKmInput(text("Range preset 2", "档位 2"), "rangePreset2Km", value, "0.1");
     snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[2]);
-    sendNumberInput(text("Range preset 3 km", "范围档位 3 km"), "rangePreset3Km", value, "0.1");
+    sendKmInput(text("Range preset 3", "档位 3"), "rangePreset3Km", value, "0.1");
     write("</fieldset>");
 
     write("<fieldset><legend>");
@@ -546,6 +595,11 @@ void ConfigPortal::renderSimplePage()
     write("</a></p></form>");
 
     write("<script>");
+    write("function toggleWifiPassword(){var p=document.getElementById('wifiPassword');var b=document.getElementById('wifiPasswordToggle');if(!p||!b){return;}var show=p.type=='password';p.type=show?'text':'password';b.innerText=show?'");
+    write(text("Hide", "隐藏"));
+    write("':'");
+    write(text("Show", "查看"));
+    write("';}");
     write("function byName(n){return document.querySelector('[name='+n+']');}");
     write("function numberValue(n,f){var e=byName(n);var v=e?parseFloat(e.value):NaN;return isNaN(v)?f:v;}");
     write("function hiddenNumber(id,f){var e=document.getElementById(id);var v=e?parseFloat(e.value):NaN;return isNaN(v)?f:v;}");
@@ -553,10 +607,44 @@ void ConfigPortal::renderSimplePage()
     write("function updateScheduleVisibility(){var m=byName('scheduleMode');var f=document.getElementById('scheduleFields');if(f&&m){f.style.display=(m.value=='window')?'block':'none';}}");
     write("function updateUsageEstimate(){var ds=byName('dataSource');var adsb=!ds||ds.value=='adsbfi';var api=byName('apiMode');var client=api&&api.value=='client';var active=activeSecondsPerDay();var reserve=hiddenNumber('creditReserveRatio',0.90);var cost=hiddenNumber('requestCostCredits',1.0);var budget=client?hiddenNumber('clientDailyCreditBudget',4000):hiddenNumber('anonymousDailyCreditBudget',400);var minMs=client?hiddenNumber('clientMinIntervalMs',5000):hiddenNumber('anonymousMinIntervalMs',10000);if(adsb){budget=0;minMs=1000;}var requestedMs=numberValue('apiIntervalSec',adsb?10:(minMs/1000))*1000;var currentMode=document.getElementById('currentApiMode');currentMode=currentMode?currentMode.value:'';var sameMode=(client&&currentMode=='client')||(!client&&currentMode=='anonymous');if(!adsb&&sameMode){var currentBudget=hiddenNumber('currentDailyCreditBudget',0);var currentMin=hiddenNumber('currentMinUsefulIntervalMs',0);if(currentBudget>0){budget=currentBudget;}if(currentMin>minMs){minMs=currentMin;}}var intervalMs=requestedMs;if(intervalMs<minMs){intervalMs=minMs;}if(intervalMs>3600000){intervalMs=3600000;}var requests=Math.floor((active*1000)/intervalMs);document.getElementById('usageApiMode').innerText=adsb?'adsb.fi Open Data':(client?'OpenSkyClient':'OpenSky Anonymous');document.getElementById('usageDailyBudget').innerText=adsb?'N/A':String(Math.round(budget));document.getElementById('usageActiveHours').innerText=(active/3600).toFixed(1)+' h';document.getElementById('usageRefreshInterval').innerText=(intervalMs/1000).toFixed(intervalMs%1000?1:0)+'s';document.getElementById('usageDailyRequests').innerText=String(requests);updateScheduleVisibility();}");
     write("function bindUsageEstimate(){['scheduleMode','startHour','startMinute','endHour','endMinute','apiMode','dataSource','apiIntervalSec'].forEach(function(n){var e=byName(n);if(e){e.addEventListener('change',updateUsageEstimate);e.addEventListener('input',updateUsageEstimate);}});['creditReserveRatio','requestCostCredits','currentDailyCreditBudget','currentApiMode','anonymousDailyCreditBudget','clientDailyCreditBudget','anonymousMinIntervalMs','clientMinIntervalMs','currentMinUsefulIntervalMs'].forEach(function(id){var e=document.getElementById(id);if(e){e.addEventListener('change',updateUsageEstimate);e.addEventListener('input',updateUsageEstimate);}});}");
-    write("function usePhoneLocation(){var s=document.getElementById('geoStatus');if(!window.isSecureContext){s.innerText='Browser blocks GPS on HTTP IP pages. Enter latitude/longitude manually.';return;}if(!navigator.geolocation){s.innerText='Geolocation is not available in this browser.';return;}s.innerText='Requesting location permission...';navigator.geolocation.getCurrentPosition(function(p){document.querySelector('[name=centerLat]').value=p.coords.latitude.toFixed(6);document.querySelector('[name=centerLon]').value=p.coords.longitude.toFixed(6);s.innerText='Location filled. Accuracy: '+Math.round(p.coords.accuracy)+' m';},function(e){var m='Location failed';if(e.code==1){m='Location permission denied';}else if(e.code==2){m='Location unavailable';}else if(e.code==3){m='Location timeout';}s.innerText=m+'. Enter latitude/longitude manually.';},{enableHighAccuracy:true,timeout:12000,maximumAge:30000});}");
+    write("var geoSecureMsg=\"");
+    write(text("Browser blocks GPS on HTTP IP pages. Enter latitude/longitude manually.",
+               "浏览器会阻止 HTTP IP 页面获取定位，请手动输入经纬度。"));
+    write("\";var geoUnavailableMsg=\"");
+    write(text("Geolocation is not available in this browser.",
+               "当前浏览器不支持定位。"));
+    write("\";var geoRequestMsg=\"");
+    write(text("Requesting location permission...",
+               "正在请求定位权限..."));
+    write("\";var geoFilledMsg=\"");
+    write(text("Location filled. Accuracy: ",
+               "已填入当前位置，精度约 "));
+    write("\";var geoFailedMsg=\"");
+    write(text("Location failed",
+               "定位失败"));
+    write("\";var geoDeniedMsg=\"");
+    write(text("Location permission denied",
+               "定位权限被拒绝"));
+    write("\";var geoUnavailable2Msg=\"");
+    write(text("Location unavailable",
+               "无法获取当前位置"));
+    write("\";var geoTimeoutMsg=\"");
+    write(text("Location timeout",
+               "定位超时"));
+    write("\";var geoManualMsg=\"");
+    write(text(". Enter latitude/longitude manually.",
+               "，请手动输入经纬度。"));
+    write("\";var hintOpenSky=\"");
+    write(text("OpenSky can use anonymous mode or your API Client.",
+               "OpenSky 可以使用匿名模式，也可以使用你的 API Client。"));
+    write("\";var hintAdsb=\"");
+    write(text("adsb.fi public endpoint does not require login.",
+               "adsb.fi 公共接口不需要登录。"));
+    write("\";");
+    write("function usePhoneLocation(){var s=document.getElementById('geoStatus');if(!window.isSecureContext){s.innerText=geoSecureMsg;return;}if(!navigator.geolocation){s.innerText=geoUnavailableMsg;return;}s.innerText=geoRequestMsg;navigator.geolocation.getCurrentPosition(function(p){document.querySelector('[name=centerLat]').value=p.coords.latitude.toFixed(6);document.querySelector('[name=centerLon]').value=p.coords.longitude.toFixed(6);s.innerText=geoFilledMsg+Math.round(p.coords.accuracy)+' m';},function(e){var m=geoFailedMsg;if(e.code==1){m=geoDeniedMsg;}else if(e.code==2){m=geoUnavailable2Msg;}else if(e.code==3){m=geoTimeoutMsg;}s.innerText=m+geoManualMsg;},{enableHighAccuracy:true,timeout:12000,maximumAge:30000});}");
     write("function setBrowserTimezone(){var o=-new Date().getTimezoneOffset();var e=document.getElementById('timezoneOffsetMinutes');var found=false;for(var i=0;i<e.options.length;i++){if(e.options[i].value==String(o)){e.selectedIndex=i;found=true;}}if(!found){var opt=document.createElement('option');opt.value=String(o);opt.text='UTC'+(o>=0?'+':'')+(o/60);opt.selected=true;e.add(opt);}}");
     write("function toggleClientFields(v){var c=document.getElementById('clientFields');if(c){c.style.display=(v=='client')?'block':'none';}updateUsageEstimate();}");
-    write("function toggleDataSource(v){var open=v=='opensky';var f=document.getElementById('openSkyAccountFields');var h=document.getElementById('dataSourceHint');if(f){f.style.display=open?'block':'none';}if(h){h.innerText=open?'OpenSky can use anonymous mode or your API Client.':'adsb.fi public endpoint does not require login.';}updateUsageEstimate();}");
+    write("function toggleDataSource(v){var open=v=='opensky';var f=document.getElementById('openSkyAccountFields');var h=document.getElementById('dataSourceHint');if(f){f.style.display=open?'block':'none';}if(h){h.innerText=open?hintOpenSky:hintAdsb;}updateUsageEstimate();}");
     write("bindUsageEstimate();toggleClientFields(document.querySelector('[name=apiMode]').value);toggleDataSource(document.querySelector('[name=dataSource]').value);updateUsageEstimate();");
     write("</script>");
     sendPageFooter();
@@ -583,119 +671,65 @@ void ConfigPortal::renderAdvancedPage()
     write("</h1><form method=\"POST\" action=\"/saveAdvanced\">");
     sendHiddenLanguage();
 
-    write("<fieldset><legend>Location / Query Box</legend>");
-    snprintf(value, sizeof(value), "%.6f", settings.location.centerLat);
-    sendNumberInput("centerLat", "centerLat", value, "0.000001");
-    snprintf(value, sizeof(value), "%.6f", settings.location.centerLon);
-    sendNumberInput("centerLon", "centerLon", value, "0.000001");
-    snprintf(value, sizeof(value), "%.1f", settings.location.maxRangeKm);
-    sendNumberInput("maxRangeKm", "maxRangeKm", value, "0.1");
-    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[0]);
-    sendNumberInput("rangePreset1Km", "rangePreset1Km", value, "0.1");
-    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[1]);
-    sendNumberInput("rangePreset2Km", "rangePreset2Km", value, "0.1");
-    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[2]);
-    sendNumberInput("rangePreset3Km", "rangePreset3Km", value, "0.1");
-    snprintf(value, sizeof(value), "%.6f", settings.location.queryLatMin);
-    sendNumberInput("queryLatMin", "queryLatMin", value, "0.000001");
-    snprintf(value, sizeof(value), "%.6f", settings.location.queryLonMin);
-    sendNumberInput("queryLonMin", "queryLonMin", value, "0.000001");
-    snprintf(value, sizeof(value), "%.6f", settings.location.queryLatMax);
-    sendNumberInput("queryLatMax", "queryLatMax", value, "0.000001");
-    snprintf(value, sizeof(value), "%.6f", settings.location.queryLonMax);
-    sendNumberInput("queryLonMax", "queryLonMax", value, "0.000001");
-    write("</fieldset>");
-
-    write("<fieldset><legend>API / Refresh</legend>");
-    write("<label>Provider<select name=\"apiProvider\">");
-    sendSelectOption("0", "OpenSky", settings.api.provider == ApiProvider::OpenSky);
-    sendSelectOption("1", "adsb.fi Open Data", settings.api.provider == ApiProvider::AdsbFi);
-    write("</select></label><label>Account<select name=\"accountMode\">");
-    sendSelectOption("0", "Anonymous", settings.api.accountMode == ApiAccountMode::Anonymous);
-    sendSelectOption("1", "StandardUser", settings.api.accountMode == ApiAccountMode::StandardUser);
-    sendSelectOption("2", "ActiveFeeder", settings.api.accountMode == ApiAccountMode::ActiveFeeder);
-    sendSelectOption("3", "CustomBudget", settings.api.accountMode == ApiAccountMode::CustomBudget);
-    sendSelectOption("4", "OpenSkyClient", settings.api.accountMode == ApiAccountMode::OpenSkyClient);
-    write("</select></label><label>Refresh<select name=\"refreshPolicy\">");
-    sendSelectOption("0", "AutoByDailyBudget", settings.api.refreshPolicy == RefreshPolicy::AutoByDailyBudget);
-    sendSelectOption("1", "ManualInterval", settings.api.refreshPolicy == RefreshPolicy::ManualInterval);
-    write("</select></label>");
-    sendTextInput("OpenSky Client ID", "openSkyClientId", settings.api.openSkyClientId, false);
-    sendTextInput("OpenSky Client Secret", "openSkyClientSecret", "", true);
-    snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(settings.api.dailyCreditBudget));
-    sendNumberInput("dailyCreditBudget", "dailyCreditBudget", value, "1");
-    snprintf(value, sizeof(value), "%.2f", settings.api.creditReserveRatio);
-    sendNumberInput("creditReserveRatio", "creditReserveRatio", value, "0.01");
-    snprintf(value, sizeof(value), "%.1f", settings.api.requestCostCredits);
-    sendNumberInput("requestCostCredits", "requestCostCredits", value, "0.1");
-    snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(settings.api.manualRequestIntervalMs));
-    sendNumberInput("manualRequestIntervalMs", "manualRequestIntervalMs", value, "1000");
-    snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(settings.api.minUsefulIntervalMs));
-    sendNumberInput("minUsefulIntervalMs", "minUsefulIntervalMs", value, "1000");
-    write("</fieldset>");
-
-    write("<fieldset><legend>Display / Filter</legend>");
-    write("<label>UI Theme<select name=\"uiTheme\">");
-    sendSelectOption("0", "ClassicRadar", settings.display.uiTheme == UiTheme::ClassicRadar);
-    sendSelectOption("1", "ModernRadar", settings.display.uiTheme == UiTheme::ModernRadar);
-    sendSelectOption("2", "CyberpunkRadar", settings.display.uiTheme == UiTheme::CyberpunkRadar);
-    write("</select></label>");
+    write("<fieldset><legend>");
+    write(text("Display / Filter", "显示 / 过滤"));
+    write("</legend>");
     snprintf(value, sizeof(value), "%u", settings.display.maxAircraftToDisplay);
-    sendNumberInput("maxAircraftToDisplay", "maxAircraftToDisplay", value, "1");
-    sendCheckbox("showLabels", "showLabels", settings.display.showLabels);
-    snprintf(value, sizeof(value), "%u", settings.display.brightness);
-    sendNumberInput("brightness", "brightness", value, "1");
-    sendCheckbox("showGroundTraffic", "showGroundTraffic", settings.filter.showGroundTraffic);
+    sendNumberInput(text("Max aircraft to display", "最大显示飞机数"), "maxAircraftToDisplay", value, "1");
+    sendCheckbox(text("Show labels", "显示标签"), "showLabels", settings.display.showLabels);
+    write("<p class=\"hint\">");
+    write(text("Labels show aircraft callsign near the target. Selected aircraft may also show altitude, speed, or distance depending on the current UI theme.",
+               "标签会在飞机目标附近显示航班号。被选中的飞机可能还会根据当前界面风格显示高度、速度或距离。"));
+    write("</p>");
+    const uint8_t brightnessPercent = static_cast<uint8_t>((static_cast<uint16_t>(settings.display.brightness) * 100U + 127U) / 255U);
+    snprintf(value, sizeof(value), "%u", brightnessPercent);
+    write("<label>");
+    write(text("Brightness", "显示亮度"));
+    write("<span class=\"rangeLine\"><input name=\"brightnessPercent\" type=\"range\" min=\"0\" max=\"100\" step=\"1\" value=\"");
+    write(value);
+    write("\" oninput=\"document.getElementById('brightnessPercentValue').innerText=this.value+'%'\"> <span id=\"brightnessPercentValue\">");
+    write(value);
+    write("%</span></span></label>");
+    sendCheckbox(text("Show ground traffic", "显示地面目标"), "showGroundTraffic", settings.filter.showGroundTraffic);
     snprintf(value, sizeof(value), "%.1f", settings.filter.minAirborneAltitudeM);
-    sendNumberInput("minAirborneAltitudeM", "minAirborneAltitudeM", value, "0.1");
+    sendNumberInput(text("Minimum airborne altitude m", "最小空中高度 m"), "minAirborneAltitudeM", value, "0.1");
     snprintf(value, sizeof(value), "%.1f", settings.filter.minAirborneSpeedMs);
-    sendNumberInput("minAirborneSpeedMs", "minAirborneSpeedMs", value, "0.1");
+    sendNumberInput(text("Minimum airborne speed m/s", "最小空中速度 m/s"), "minAirborneSpeedMs", value, "0.1");
+    write("<p class=\"hint\">");
+    write(text("Filtering removes aircraft below the minimum altitude or below the minimum speed. This helps hide ground, parked, or very slow airport targets.",
+               "过滤会隐藏低于最小高度或低于最小速度的目标，用于减少机场地面、停机或低速目标堆在雷达上的情况。"));
+    write("</p>");
     write("</fieldset>");
 
-    write("<fieldset><legend>Schedule</legend>");
-    sendCheckbox("scheduleEnabled", "scheduleEnabled", settings.schedule.enabled);
-    snprintf(value, sizeof(value), "%d", settings.schedule.startMinutesOfDay / 60);
-    sendNumberInput("startHour", "startHour", value, "1");
-    snprintf(value, sizeof(value), "%d", settings.schedule.startMinutesOfDay % 60);
-    sendNumberInput("startMinute", "startMinute", value, "1");
-    snprintf(value, sizeof(value), "%d", settings.schedule.endMinutesOfDay / 60);
-    sendNumberInput("endHour", "endHour", value, "1");
-    snprintf(value, sizeof(value), "%d", settings.schedule.endMinutesOfDay % 60);
-    sendNumberInput("endMinute", "endMinute", value, "1");
-    snprintf(value, sizeof(value), "%d", settings.schedule.timezoneOffsetMinutes);
-    sendNumberInput("timezoneOffsetMinutes", "timezoneOffsetMinutes", value, "1");
-    write("<label>idleDisplayMode<select name=\"idleDisplayMode\">");
-    sendSelectOption("0", "PausedStatus", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::PausedStatus);
-    sendSelectOption("1", "Clock", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::Clock);
-    sendSelectOption("2", "DisplayOff", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::DisplayOff);
-    write("</select></label>");
-    write("</fieldset>");
-
-    write("<fieldset><legend>Prediction</legend>");
-    sendCheckbox("predictionEnabled", "predictionEnabled", settings.prediction.enabled);
+    write("<fieldset><legend>");
+    write(text("Prediction", "位置预测"));
+    write("</legend>");
+    sendCheckbox(text("Prediction enabled", "启用位置预测"), "predictionEnabled", settings.prediction.enabled);
     snprintf(value, sizeof(value), "%.2f", settings.prediction.followAlpha);
-    sendNumberInput("followAlpha", "followAlpha", value, "0.01");
+    sendNumberInput(text("Follow alpha", "跟随平滑系数"), "followAlpha", value, "0.01");
     snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(settings.prediction.predictionMaxMs));
-    sendNumberInput("predictionMaxMs", "predictionMaxMs", value, "1000");
+    sendNumberInput(text("Prediction max ms", "最大预测时间 ms"), "predictionMaxMs", value, "1000");
     snprintf(value, sizeof(value), "%.1f", settings.prediction.jumpResetDistanceKm);
-    sendNumberInput("jumpResetDistanceKm", "jumpResetDistanceKm", value, "0.1");
+    sendKmInput(text("Jump reset distance", "跳变重置距离"), "jumpResetDistanceKm", value, "0.1");
     snprintf(value, sizeof(value), "%.1f", settings.prediction.lowSpeedThresholdMs);
-    sendNumberInput("lowSpeedThresholdMs", "lowSpeedThresholdMs", value, "0.1");
+    sendNumberInput(text("Low speed threshold m/s", "低速阈值 m/s"), "lowSpeedThresholdMs", value, "0.1");
     snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(settings.prediction.staleTimeoutMs));
-    sendNumberInput("staleTimeoutMs", "staleTimeoutMs", value, "1000");
-    sendCheckbox("correctionEnabled", "correctionEnabled", settings.prediction.correctionEnabled);
+    sendNumberInput(text("Stale timeout ms", "数据过期时间 ms"), "staleTimeoutMs", value, "1000");
+    sendCheckbox(text("Correction enabled", "启用修正动画"), "correctionEnabled", settings.prediction.correctionEnabled);
     snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(settings.prediction.correctionMinApiIntervalMs));
-    sendNumberInput("correctionMinApiIntervalMs", "correctionMinApiIntervalMs", value, "1000");
+    sendNumberInput(text("Correction min API interval ms", "修正最小 API 间隔 ms"), "correctionMinApiIntervalMs", value, "1000");
     snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(settings.prediction.correctionDurationMs));
-    sendNumberInput("correctionDurationMs", "correctionDurationMs", value, "1000");
+    sendNumberInput(text("Correction duration ms", "修正动画时长 ms"), "correctionDurationMs", value, "1000");
     snprintf(value, sizeof(value), "%.1f", settings.prediction.correctionStartDistanceKm);
-    sendNumberInput("correctionStartDistanceKm", "correctionStartDistanceKm", value, "0.1");
+    sendKmInput(text("Correction start distance", "修正起始距离"), "correctionStartDistanceKm", value, "0.1");
     write("</fieldset>");
 
-    write("<fieldset><legend>System</legend>");
+    write("<fieldset><legend>");
+    write(text("System", "系统"));
+    write("</legend>");
     snprintf(value, sizeof(value), "%d", settings.system.uiButtonPin);
-    sendNumberInput("uiButtonPin", "uiButtonPin", value, "1");
-    sendCheckbox("serialDebug", "serialDebug", settings.system.serialDebug);
+    sendNumberInput(text("UI button pin", "UI 按键引脚"), "uiButtonPin", value, "1");
+    sendCheckbox(text("Serial debug", "串口调试"), "serialDebug", settings.system.serialDebug);
     write("</fieldset><p><button type=\"submit\">");
     write(text("Save advanced settings", "保存高级设置"));
     write("</button></p></form>");
@@ -713,8 +747,14 @@ void ConfigPortal::renderSavedPage(bool saved)
     {
         write(text("Please check the serial log for details.", "请查看串口日志了解详情。"));
     }
-    else if (strcmp(nvsStateText(), "enabled") != 0)
+    else
     {
+        write(text("Settings were saved. Restart the device to fully apply WiFi, startup, and connection-related changes.",
+                   "设置已保存。WiFi、启动和连接相关改动需要重启设备后才能完整生效。"));
+    }
+    if (saved && strcmp(nvsStateText(), "enabled") != 0)
+    {
+        write("</p><p>");
         write(text("NVS is disabled. Settings are only valid until reboot.", "NVS 未启用，设置只在本次运行期间有效。"));
     }
     write("</p><p><a href=\"/?lang=");
@@ -825,19 +865,18 @@ void ConfigPortal::applyAdvancedFormToSettings()
     settings.display.uiTheme = static_cast<UiTheme>(argToInt("uiTheme", static_cast<int>(settings.display.uiTheme)));
     settings.display.maxAircraftToDisplay = static_cast<uint8_t>(argToInt("maxAircraftToDisplay", settings.display.maxAircraftToDisplay));
     settings.display.showLabels = hasCheckedArg("showLabels");
-    settings.display.brightness = static_cast<uint8_t>(argToInt("brightness", settings.display.brightness));
+    if (server_.hasArg("brightnessPercent"))
+    {
+        const int brightnessPercent = constrain(argToInt("brightnessPercent", 100), 0, 100);
+        settings.display.brightness = static_cast<uint8_t>((brightnessPercent * 255 + 50) / 100);
+    }
+    else
+    {
+        settings.display.brightness = static_cast<uint8_t>(argToInt("brightness", settings.display.brightness));
+    }
     settings.filter.showGroundTraffic = hasCheckedArg("showGroundTraffic");
     settings.filter.minAirborneAltitudeM = argToFloat("minAirborneAltitudeM", settings.filter.minAirborneAltitudeM);
     settings.filter.minAirborneSpeedMs = argToFloat("minAirborneSpeedMs", settings.filter.minAirborneSpeedMs);
-
-    settings.schedule.enabled = hasCheckedArg("scheduleEnabled");
-    settings.schedule.startMinutesOfDay = argToInt("startHour", settings.schedule.startMinutesOfDay / 60) * 60 +
-                                          argToInt("startMinute", settings.schedule.startMinutesOfDay % 60);
-    settings.schedule.endMinutesOfDay = argToInt("endHour", settings.schedule.endMinutesOfDay / 60) * 60 +
-                                        argToInt("endMinute", settings.schedule.endMinutesOfDay % 60);
-    settings.schedule.timezoneOffsetMinutes = argToInt("timezoneOffsetMinutes", settings.schedule.timezoneOffsetMinutes);
-    settings.schedule.idleDisplayMode = static_cast<ScheduleIdleDisplayMode>(
-        argToInt("idleDisplayMode", static_cast<int>(settings.schedule.idleDisplayMode)));
 
     settings.prediction.enabled = hasCheckedArg("predictionEnabled");
     settings.prediction.followAlpha = argToFloat("followAlpha", settings.prediction.followAlpha);
@@ -888,11 +927,15 @@ const char *ConfigPortal::toggleLanguageLabel() const
 void ConfigPortal::sendPageHeader(const char *title)
 {
     page_ = "";
-    page_.reserve(28000);
+    page_.reserve(32000);
     write("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
     write("<title>");
     write(title);
-    write("</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;margin:16px auto;padding:0 12px;max-width:940px;background:#f4f7fb;color:#172033}h1{font-size:24px;margin:8px 0 12px}form{display:grid;gap:12px}fieldset{margin:0;padding:14px;border:1px solid #d7e0ea;border-radius:10px;background:#fff;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 14px}legend{font-weight:700;padding:0 6px}label{display:block;color:#526070;font-size:13px;font-weight:600}input,select{width:100%;box-sizing:border-box;margin-top:5px;padding:9px;border:1px solid #cfd8e3;border-radius:8px;background:#fbfcfe;font-size:15px}button{padding:10px 14px;border:0;border-radius:8px;background:#1269d3;color:#fff;font-weight:700}button[type=button]{background:#e7eef8;color:#16406f}a{display:inline-block;margin:4px 8px 4px 0;color:#1269d3;text-decoration:none;font-weight:600}.hint,fieldset>p,fieldset>div{grid-column:1/-1}.hint{font-size:13px;color:#64748b}@media(max-width:560px){body{margin:10px auto}fieldset{grid-template-columns:1fr}}</style></head><body>");
+    write("</title><style>");
+    write(":root{color-scheme:dark;--bg:#050b14;--panel:#0d1b2b;--panel2:#102438;--line:#244865;--text:#e8f6ff;--muted:#8fb3c8;--hint:#789aae;--accent:#28d8ff;--accent2:#35f0b4;--danger:#ff7a59}");
+    write("*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;margin:0 auto;padding:14px 12px 26px;max-width:760px;background:radial-gradient(circle at 50% -16%,rgba(40,216,255,.18),transparent 360px),linear-gradient(180deg,#071426,#04080f);color:var(--text);font-size:15px;line-height:1.45}h1{font-size:24px;margin:8px 0 12px;letter-spacing:.02em}p{margin-top:0}form{display:grid;gap:12px}");
+    write("fieldset{margin:0;padding:14px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,rgba(16,36,56,.94),rgba(9,20,32,.96));box-shadow:0 10px 28px rgba(0,0,0,.26);display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 14px}legend{font-weight:800;padding:0 6px;color:var(--accent)}label{display:block;color:var(--muted);font-size:13px;font-weight:650}input,select{width:100%;box-sizing:border-box;margin-top:5px;padding:10px;border:1px solid #2c5a78;border-radius:9px;background:#071522;color:var(--text);font-size:15px;outline:none}input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40,216,255,.14)}");
+    write("button{padding:10px 14px;border:0;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#031018;font-weight:800}button[type=button]{background:#17304a;color:var(--text);border:1px solid #2e5f7e}a{display:inline-block;margin:4px 8px 4px 0;color:var(--accent);text-decoration:none;font-weight:700}.hint,fieldset>p,fieldset>div{grid-column:1/-1}.hint{font-size:13px;color:var(--hint)}.unit,.passwordRow,.rangeLine{display:flex;align-items:center;gap:8px}.unit input,.passwordRow input,.rangeLine input{flex:1}.unit span,.rangeLine span{margin-top:5px;color:var(--muted);font-size:14px;font-weight:800}.passwordRow button{min-width:70px;margin-top:5px;padding:10px 12px}input[type=range]{padding:0;accent-color:var(--accent)}@media(max-width:560px){body{padding:10px 10px 24px}fieldset{grid-template-columns:1fr}}</style></head><body>");
 }
 
 void ConfigPortal::sendPageFooter()
@@ -953,6 +996,19 @@ void ConfigPortal::sendNumberInput(const char *label, const char *name, const ch
     write("\" value=\"");
     write(value);
     write("\"></label>");
+}
+
+void ConfigPortal::sendKmInput(const char *label, const char *name, const char *value, const char *step)
+{
+    write("<label>");
+    write(label);
+    write("<span class=\"unit\"><input name=\"");
+    write(name);
+    write("\" type=\"number\" step=\"");
+    write(step);
+    write("\" value=\"");
+    write(value);
+    write("\"><span>km</span></span></label>");
 }
 
 void ConfigPortal::sendCheckbox(const char *label, const char *name, bool checked)

@@ -48,7 +48,7 @@ private:
     bool restartRequested_ = false;
     bool dnsRunning_ = false;
     ConfigPortalMode mode_ = ConfigPortalMode::ApSetup;
-    PageLanguage pageLanguage_ = PageLanguage::English;
+    PageLanguage pageLanguage_ = PageLanguage::Chinese;
     char apSsid_[32] = "";
     char ipAddress_[16] = "192.168.4.1";
     char staIpAddress_[16] = "0.0.0.0";
@@ -80,9 +80,11 @@ private:
     void sendLanguageSwitch(const char *path);
     void sendTextInput(const char *label, const char *name, const char *value, bool password);
     void sendNumberInput(const char *label, const char *name, const char *value, const char *step);
+    void sendKmInput(const char *label, const char *name, const char *value, const char *step);
     void sendCheckbox(const char *label, const char *name, bool checked);
     void sendSelectOption(const char *value, const char *label, bool selected);
     void sendHiddenLanguage();
+    void sendStatusPanel(uint32_t intervalMs);
     bool hasCheckedArg(const char *name);
     int argToInt(const char *name, int fallback);
     uint32_t argToUInt(const char *name, uint32_t fallback);
