@@ -522,6 +522,7 @@ void ConfigPortal::renderSimplePage()
     sendSelectOption("0", text("Classic Radar", "经典雷达"), settings.display.uiTheme == UiTheme::ClassicRadar);
     sendSelectOption("1", text("Modern Display", "现代显示"), settings.display.uiTheme == UiTheme::ModernRadar);
     sendSelectOption("2", "Cyberpunk", settings.display.uiTheme == UiTheme::CyberpunkRadar);
+    sendSelectOption("3", "Plane Radar", settings.display.uiTheme == UiTheme::PlaneRadar);
     write("</select></label><label>");
     write(text("Brightness", "亮度"));
     write("<select name=\"brightness\">");

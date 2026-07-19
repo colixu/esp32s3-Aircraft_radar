@@ -8,7 +8,8 @@ enum class UiTheme
 {
     ClassicRadar,
     ModernRadar,
-    CyberpunkRadar
+    CyberpunkRadar,
+    PlaneRadar
 };
 
 enum class ApiProvider

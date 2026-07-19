@@ -236,6 +236,9 @@ bool AdsbFiProvider::parsePayload(const String &payload, const UserSettings &set
             copyTrimmed(candidate.callsign, sizeof(candidate.callsign), candidate.icao24);
         }
 
+        const char *type = item["t"] | "";
+        copyTrimmed(candidate.type, sizeof(candidate.type), type);
+
         candidate.lat = lat;
         candidate.lon = lon;
         candidate.onGround = false;
@@ -321,9 +324,10 @@ void AdsbFiProvider::printSummary() const
     for (uint8_t i = 0; i < count; ++i)
     {
         const ApiAircraft &target = aircraft_[i];
-        DebugLog::printf("  #%u %-11s icao=%s lat=%.5f lon=%.5f alt=%.0fm speed=%.1fm/s hdg=%.0f onGround=%u\r\n",
+        DebugLog::printf("  #%u %-11s type=%s icao=%s lat=%.5f lon=%.5f alt=%.0fm speed=%.1fm/s hdg=%.0f onGround=%u\r\n",
                          i + 1,
                          target.callsign,
+                         target.type[0] != '\0' ? target.type : "--",
                          target.icao24,
                          target.lat,
                          target.lon,

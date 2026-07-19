@@ -232,6 +232,72 @@ private:
                                              int16_t y0,
                                              int16_t &x1,
                                              int16_t &y1) const;
+    void renderPlaneRadarFrame(const Aircraft *aircraft,
+                               uint8_t aircraftCount,
+                               uint8_t selectedAircraftIndex,
+                               const AppConfig &config,
+                               const char *statusText);
+    void drawPlaneRadarBackground(TFT_eSprite &canvas, const AppConfig &config);
+    void drawPlaneRadarCardinals(TFT_eSprite &canvas,
+                                 uint16_t textColor,
+                                 uint16_t backgroundColor);
+    void drawPlaneRadarRangeLabels(TFT_eSprite &canvas,
+                                   const AppConfig &config,
+                                   uint16_t gridColor,
+                                   uint16_t textColor,
+                                   uint16_t backgroundColor);
+    void drawPlaneRadarAircraft(TFT_eSprite &canvas,
+                                const Aircraft *aircraft,
+                                uint8_t aircraftCount,
+                                uint8_t selectedAircraftIndex,
+                                const AppConfig &config);
+    void drawPlaneRadarAircraftSymbol(TFT_eSprite &canvas,
+                                      const Aircraft &target,
+                                      int16_t x,
+                                      int16_t y,
+                                      bool selected,
+                                      uint16_t aircraftColor,
+                                      uint16_t selectedColor);
+    void drawPlaneRadarSpeedVector(TFT_eSprite &canvas,
+                                   const Aircraft &target,
+                                   int16_t x,
+                                   int16_t y,
+                                   const AppConfig &config,
+                                   uint16_t vectorColor);
+    void drawPlaneRadarAircraftLabel(TFT_eSprite &canvas,
+                                     const Aircraft &target,
+                                     int16_t x,
+                                     int16_t y,
+                                     bool selected,
+                                     LabelRect *usedLabels,
+                                     uint8_t &usedLabelCount,
+                                     uint16_t textColor,
+                                     uint16_t typeColor,
+                                     uint16_t backgroundColor);
+    void drawPlaneRadarBeyondDot(TFT_eSprite &canvas,
+                                 const Aircraft &target,
+                                 uint16_t aircraftColor);
+    bool planeRadarToScreen(const Aircraft &target,
+                            const AppConfig &config,
+                            int16_t &x,
+                            int16_t &y,
+                            bool &insideDisplayRange) const;
+    int planeRadarSpeedVectorLengthPx(float speedMs, const AppConfig &config) const;
+    void planeRadarNoseTip(int16_t x,
+                           int16_t y,
+                           float headingDeg,
+                           int16_t &tipX,
+                           int16_t &tipY) const;
+    void clipPlaneRadarPointToOuterRing(int16_t x0,
+                                        int16_t y0,
+                                        int16_t &x1,
+                                        int16_t &y1) const;
+    void formatPlaneRadarAltitude(float altitudeM, char *buffer, size_t bufferSize) const;
+    void renderPlaneRadarStatusText(TFT_eSprite &canvas,
+                                    const char *statusText,
+                                    uint16_t textColor,
+                                    uint16_t backgroundColor);
+    void renderOriginalRunwayOverlay(TFT_eSprite &canvas);
     void renderCyberpunkRadarFrame(const Aircraft *aircraft,
                                    uint8_t aircraftCount,
                                    uint8_t selectedAircraftIndex,

@@ -362,6 +362,8 @@ uint8_t RealRadarTrackManager::updateTrackFromApi(TrackedAircraft &track,
     track.icao24[sizeof(track.icao24) - 1] = '\0';
     strncpy(track.callsign, source.callsign, sizeof(track.callsign) - 1);
     track.callsign[sizeof(track.callsign) - 1] = '\0';
+    strncpy(track.type, source.type, sizeof(track.type) - 1);
+    track.type[sizeof(track.type) - 1] = '\0';
 
     track.apiLat = source.lat;
     track.apiLon = source.lon;
@@ -490,6 +492,8 @@ void RealRadarTrackManager::addAircraftSorted(Aircraft *aircraft,
                                track.displaySpeedMs,
                                track.displayHeadingDeg,
                                true);
+    strncpy(aircraft[insertIndex].type, track.type, sizeof(aircraft[insertIndex].type) - 1);
+    aircraft[insertIndex].type[sizeof(aircraft[insertIndex].type) - 1] = '\0';
 
     while (insertIndex > 0 &&
            aircraft[insertIndex].distanceKm < aircraft[insertIndex - 1].distanceKm)

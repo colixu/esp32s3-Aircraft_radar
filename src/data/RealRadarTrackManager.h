@@ -10,6 +10,7 @@ struct TrackedAircraft
 {
     char icao24[8];
     char callsign[12];
+    char type[8];
 
     float apiLat = 0.0f;
     float apiLon = 0.0f;

@@ -74,6 +74,7 @@ private:
     Aircraft uiLabAircraft_[AircraftModel::kAircraftCount];
     uint8_t realAircraftCount_ = 0;
     uint8_t uiLabAircraftCount_ = 0;
+    uint16_t lastRealRadarFilteredCount_ = 0;
     char realRadarStatus_[32] = "LIVE WAIT";
     DeviceState deviceState_ = DeviceState::Boot;
     DeviceState uiLabPreviousDeviceState_ = DeviceState::Boot;

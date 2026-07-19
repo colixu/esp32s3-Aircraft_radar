@@ -30,7 +30,8 @@ namespace
     {
         return theme == UiTheme::ClassicRadar ||
                theme == UiTheme::ModernRadar ||
-               theme == UiTheme::CyberpunkRadar;
+               theme == UiTheme::CyberpunkRadar ||
+               theme == UiTheme::PlaneRadar;
     }
 
     bool isValidApiProvider(ApiProvider provider)
@@ -461,6 +462,8 @@ const char *uiThemeName(UiTheme theme)
             return "ModernRadar";
         case UiTheme::CyberpunkRadar:
             return "CyberpunkRadar";
+        case UiTheme::PlaneRadar:
+            return "PlaneRadar";
         default:
             return "Unknown";
     }
@@ -541,6 +544,8 @@ UiTheme nextUiTheme(UiTheme theme)
         case UiTheme::ModernRadar:
             return UiTheme::CyberpunkRadar;
         case UiTheme::CyberpunkRadar:
+            return UiTheme::PlaneRadar;
+        case UiTheme::PlaneRadar:
         default:
             return UiTheme::ClassicRadar;
     }

@@ -52,6 +52,35 @@ namespace
         static constexpr int16_t speedLineMaxPx = 28;
     };
 
+    // Inspired by MatixYo/ESP32-Plane-Radar:
+    // https://github.com/MatixYo/ESP32-Plane-Radar
+    struct PlaneRadarTheme
+    {
+        static constexpr int16_t size = 240;
+        static constexpr int16_t centerX = 120;
+        static constexpr int16_t centerY = 120;
+        static constexpr int16_t outerRadius = 107;
+        static constexpr int16_t cardinalNorthOffsetY = -1;
+        static constexpr int16_t cardinalSouthOffsetY = 3;
+        static constexpr int16_t scaleGapFromOuterRing = 6;
+        static constexpr uint8_t ringCount = 4;
+        static constexpr float gridStrokeHalfWidth = 1.0f;
+        static constexpr int16_t centerDotRadius = 2;
+        static constexpr int16_t aircraftNoseLength = 8;
+        static constexpr int16_t aircraftTailLength = 3;
+        static constexpr int16_t aircraftTailHalfWidth = 4;
+        static constexpr int16_t aircraftLabelGap = 1;
+        static constexpr int16_t aircraftInsideRingInset = aircraftNoseLength + aircraftTailHalfWidth + 1;
+        static constexpr int16_t beyondRingDotRadius = 4;
+        static constexpr int16_t beyondRingScreenMargin = 2;
+        static constexpr uint32_t trackHorizonSec = 60;
+        static constexpr int16_t speedLineMinPx = 2;
+        static constexpr float trackRefOuterKm = 13.3f;
+        static constexpr float trackLengthScale = 1.5f / 5.0f;
+        static constexpr int16_t aircraftTagLabelHeightPx = 13;
+        static constexpr uint8_t maxDrawItems = 16;
+    };
+
     constexpr int16_t kCyberMapWestCoast[][2] =
     {
         {47, 64}, {35, 75}, {42, 88}, {34, 102}, {49, 113}, {42, 128},
@@ -139,6 +168,68 @@ namespace
         {
             canvas.drawCircle(x, y, radius - i, color);
         }
+    }
+
+    int planeRadarDistSqFromCenter(int16_t x, int16_t y)
+    {
+        const int16_t dx = x - PlaneRadarTheme::centerX;
+        const int16_t dy = y - PlaneRadarTheme::centerY;
+        return static_cast<int>(dx) * static_cast<int>(dx) +
+               static_cast<int>(dy) * static_cast<int>(dy);
+    }
+
+    float planeRadarOuterRangeKm(const AppConfig &config)
+    {
+        return max(config.maxRangeKm, 1.0f) * 4.0f / 3.0f;
+    }
+
+    float planeRadarInnerRangeKm(const AppConfig &config)
+    {
+        return planeRadarOuterRangeKm(config) *
+               static_cast<float>(PlaneRadarTheme::outerRadius - PlaneRadarTheme::aircraftInsideRingInset) /
+               static_cast<float>(PlaneRadarTheme::outerRadius);
+    }
+
+    struct PlaneRadarDrawItem
+    {
+        uint8_t index = 0;
+        int16_t x = 0;
+        int16_t y = 0;
+        int distSq = 0;
+    };
+
+    void sortPlaneRadarItemsFarFirst(PlaneRadarDrawItem *items, uint8_t count)
+    {
+        for (uint8_t i = 1; i < count; ++i)
+        {
+            const PlaneRadarDrawItem key = items[i];
+            uint8_t j = i;
+            while (j > 0 && items[j - 1].distSq < key.distSq)
+            {
+                items[j] = items[j - 1];
+                --j;
+            }
+            items[j] = key;
+        }
+    }
+
+    int planeRadarAbsDiff(int a, int b)
+    {
+        return a > b ? a - b : b - a;
+    }
+
+    const GFXfont *pickPlaneRadarTagFont(TFT_eSprite &canvas)
+    {
+        canvas.setTextSize(1);
+
+        canvas.setFreeFont(&FreeSansBold12pt7b);
+        const int height12 = canvas.fontHeight();
+        canvas.setFreeFont(&FreeSansBold9pt7b);
+        const int height9 = canvas.fontHeight();
+
+        const int diff12 = planeRadarAbsDiff(height12, PlaneRadarTheme::aircraftTagLabelHeightPx);
+        const int diff9 = planeRadarAbsDiff(height9, PlaneRadarTheme::aircraftTagLabelHeightPx);
+        return diff12 < diff9 ? &FreeSansBold12pt7b : &FreeSansBold9pt7b;
     }
 }
 
@@ -343,6 +434,9 @@ void RadarRenderer::renderRadarFrame(const Aircraft *aircraft,
             return;
         case UiTheme::CyberpunkRadar:
             renderCyberpunkRadarFrame(aircraft, aircraftCount, selectedAircraftIndex, config, statusText);
+            return;
+        case UiTheme::PlaneRadar:
+            renderPlaneRadarFrame(aircraft, aircraftCount, selectedAircraftIndex, config, statusText);
             return;
         case UiTheme::ClassicRadar:
         default:
@@ -833,6 +927,536 @@ void RadarRenderer::clipModernReferencePointToOuterRing(int16_t x0,
 
     x1 = x0 + static_cast<int16_t>(dx * low);
     y1 = y0 + static_cast<int16_t>(dy * low);
+}
+
+void RadarRenderer::renderPlaneRadarFrame(const Aircraft *aircraft,
+                                          uint8_t aircraftCount,
+                                          uint8_t selectedAircraftIndex,
+                                          const AppConfig &config,
+                                          const char *statusText)
+{
+    const bool statusLooksImportant = statusText != nullptr &&
+                                      (strstr(statusText, "WIFI") != nullptr ||
+                                       strstr(statusText, "AUTH") != nullptr ||
+                                       strstr(statusText, "API") != nullptr ||
+                                       strstr(statusText, "429") != nullptr ||
+                                       strstr(statusText, "ERR") != nullptr ||
+                                       strstr(statusText, "NO ") != nullptr);
+
+    drawPlaneRadarBackground(frame_, config);
+    drawPlaneRadarAircraft(frame_, aircraft, aircraftCount, selectedAircraftIndex, config);
+    if (statusLooksImportant)
+    {
+        renderPlaneRadarStatusText(frame_,
+                                   statusText,
+                                   TFT_WHITE,
+                                   modernBackgroundColor());
+    }
+    frame_.pushSprite(0, 0);
+}
+
+void RadarRenderer::drawPlaneRadarBackground(TFT_eSprite &canvas, const AppConfig &config)
+{
+    const uint16_t bg = modernBackgroundColor();
+    const uint16_t grid = tft_.color565(16, 100, 32);
+    const uint16_t text = TFT_WHITE;
+    const uint16_t center = TFT_WHITE;
+
+    canvas.fillSprite(bg);
+    canvas.setTextSize(1);
+
+    for (uint8_t i = 1; i <= PlaneRadarTheme::ringCount; ++i)
+    {
+        const int16_t radius = static_cast<int16_t>((PlaneRadarTheme::outerRadius * i) /
+                                                   PlaneRadarTheme::ringCount);
+        drawModernWideCircle(canvas,
+                             PlaneRadarTheme::centerX,
+                             PlaneRadarTheme::centerY,
+                             radius,
+                             grid,
+                             static_cast<uint8_t>(max(1.0f, PlaneRadarTheme::gridStrokeHalfWidth * 2.0f)));
+    }
+
+    drawModernWideLine(canvas,
+                       PlaneRadarTheme::centerX,
+                       PlaneRadarTheme::centerY - PlaneRadarTheme::outerRadius,
+                       PlaneRadarTheme::centerX,
+                       PlaneRadarTheme::centerY + PlaneRadarTheme::outerRadius,
+                       grid,
+                       2);
+    drawModernWideLine(canvas,
+                       PlaneRadarTheme::centerX - PlaneRadarTheme::outerRadius,
+                       PlaneRadarTheme::centerY,
+                       PlaneRadarTheme::centerX + PlaneRadarTheme::outerRadius,
+                       PlaneRadarTheme::centerY,
+                       grid,
+                       2);
+
+    drawPlaneRadarCardinals(canvas, text, bg);
+    drawPlaneRadarRangeLabels(canvas, config, grid, text, bg);
+    renderOriginalRunwayOverlay(canvas);
+    canvas.fillCircle(PlaneRadarTheme::centerX,
+                      PlaneRadarTheme::centerY,
+                      PlaneRadarTheme::centerDotRadius,
+                      center);
+}
+
+void RadarRenderer::drawPlaneRadarCardinals(TFT_eSprite &canvas,
+                                            uint16_t textColor,
+                                            uint16_t backgroundColor)
+{
+    // The reference project targets about 14 px cap height for N/S/W/E.
+    // TFT_eSPI's built-in font 2 is closer to that size than FreeSansBold9pt.
+    constexpr uint8_t cardinalFont = 2;
+
+    canvas.setFreeFont(nullptr);
+    canvas.setTextSize(1);
+    canvas.setTextColor(textColor, backgroundColor);
+    canvas.setTextDatum(TC_DATUM);
+    canvas.drawString("N",
+                      PlaneRadarTheme::centerX,
+                      PlaneRadarTheme::cardinalNorthOffsetY,
+                      cardinalFont);
+    canvas.setTextDatum(BC_DATUM);
+    canvas.drawString("S",
+                      PlaneRadarTheme::centerX,
+                      PlaneRadarTheme::size - 1 + PlaneRadarTheme::cardinalSouthOffsetY,
+                      cardinalFont);
+    canvas.setTextDatum(ML_DATUM);
+    canvas.drawString("W", 0, PlaneRadarTheme::centerY, cardinalFont);
+    canvas.setTextDatum(MR_DATUM);
+    canvas.drawString("E", PlaneRadarTheme::size - 1, PlaneRadarTheme::centerY, cardinalFont);
+}
+
+void RadarRenderer::drawPlaneRadarRangeLabels(TFT_eSprite &canvas,
+                                              const AppConfig &config,
+                                              uint16_t gridColor,
+                                              uint16_t textColor,
+                                              uint16_t backgroundColor)
+{
+    (void)textColor;
+
+    const float displayRangeKm = max(config.maxRangeKm, 1.0f);
+    char label[16];
+
+    snprintf(label, sizeof(label), "%.0fkm", displayRangeKm);
+    canvas.setTextSize(1);
+    canvas.setTextDatum(MR_DATUM);
+    const int16_t x = PlaneRadarTheme::centerX +
+                      PlaneRadarTheme::outerRadius -
+                      PlaneRadarTheme::scaleGapFromOuterRing;
+    const int16_t y = PlaneRadarTheme::centerY;
+    const int16_t textWidth = canvas.textWidth(label, 1);
+    const int16_t textHeight = 8;
+    canvas.fillRect(x - textWidth - 3,
+                    y - textHeight / 2 - 2,
+                    textWidth + 6,
+                    textHeight + 4,
+                    backgroundColor);
+    canvas.setTextColor(gridColor, backgroundColor);
+    canvas.drawString(label, x, y, 1);
+}
+
+void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
+                                           const Aircraft *aircraft,
+                                           uint8_t aircraftCount,
+                                           uint8_t selectedAircraftIndex,
+                                           const AppConfig &config)
+{
+    if (aircraft == nullptr)
+    {
+        return;
+    }
+
+    const uint16_t aircraftColor = tft_.color565(255, 0, 0);
+    const uint16_t vectorColor = tft_.color565(255, 0, 255);
+    const uint16_t selectedColor = TFT_WHITE;
+    const uint16_t textColor = TFT_WHITE;
+    const uint16_t typeColor = tft_.color565(90, 200, 255);
+    const uint16_t bg = modernBackgroundColor();
+
+    PlaneRadarDrawItem dots[PlaneRadarTheme::maxDrawItems];
+    PlaneRadarDrawItem items[PlaneRadarTheme::maxDrawItems];
+    uint8_t dotCount = 0;
+    uint8_t itemCount = 0;
+
+    for (uint8_t i = 0; i < aircraftCount; ++i)
+    {
+        int16_t x = 0;
+        int16_t y = 0;
+        bool insideOuterRing = false;
+        if (!planeRadarToScreen(aircraft[i], config, x, y, insideOuterRing))
+        {
+            continue;
+        }
+
+        if (insideOuterRing)
+        {
+            if (itemCount < PlaneRadarTheme::maxDrawItems)
+            {
+                items[itemCount].index = i;
+                items[itemCount].x = x;
+                items[itemCount].y = y;
+                items[itemCount].distSq = planeRadarDistSqFromCenter(x, y);
+                ++itemCount;
+            }
+        }
+        else if (dotCount < PlaneRadarTheme::maxDrawItems)
+        {
+            const float bearing = aircraft[i].bearingDeg * DEG_TO_RAD;
+            const int16_t rimRadius = PlaneRadarTheme::centerX - PlaneRadarTheme::beyondRingScreenMargin;
+            const int16_t dotX = PlaneRadarTheme::centerX +
+                                 static_cast<int16_t>(lroundf(sinf(bearing) * rimRadius));
+            const int16_t dotY = PlaneRadarTheme::centerY -
+                                 static_cast<int16_t>(lroundf(cosf(bearing) * rimRadius));
+            dots[dotCount].index = i;
+            dots[dotCount].x = dotX;
+            dots[dotCount].y = dotY;
+            dots[dotCount].distSq = planeRadarDistSqFromCenter(dotX, dotY);
+            ++dotCount;
+        }
+    }
+
+    sortPlaneRadarItemsFarFirst(dots, dotCount);
+    for (uint8_t i = 0; i < dotCount; ++i)
+    {
+        drawPlaneRadarBeyondDot(canvas, aircraft[dots[i].index], aircraftColor);
+    }
+
+    sortPlaneRadarItemsFarFirst(items, itemCount);
+    for (uint8_t i = 0; i < itemCount; ++i)
+    {
+        const Aircraft &target = aircraft[items[i].index];
+        drawPlaneRadarSpeedVector(canvas, target, items[i].x, items[i].y, config, vectorColor);
+        drawPlaneRadarAircraftSymbol(canvas, target, items[i].x, items[i].y, false, aircraftColor, selectedColor);
+    }
+
+    LabelRect usedLabels[kMaxTrackedLabels];
+    uint8_t usedLabelCount = 0;
+    for (uint8_t i = 0; i < itemCount; ++i)
+    {
+        const uint8_t aircraftIndex = items[i].index;
+        if (config.showLabels)
+        {
+            drawPlaneRadarAircraftLabel(canvas,
+                                        aircraft[aircraftIndex],
+                                        items[i].x,
+                                        items[i].y,
+                                        aircraftIndex == selectedAircraftIndex,
+                                        usedLabels,
+                                        usedLabelCount,
+                                        textColor,
+                                        typeColor,
+                                        bg);
+        }
+    }
+}
+
+void RadarRenderer::drawPlaneRadarAircraftSymbol(TFT_eSprite &canvas,
+                                                 const Aircraft &target,
+                                                 int16_t x,
+                                                 int16_t y,
+                                                 bool selected,
+                                                 uint16_t aircraftColor,
+                                                 uint16_t selectedColor)
+{
+    const float headingDeg = isfinite(target.headingDeg) ? target.headingDeg : target.bearingDeg;
+    const float heading = headingDeg * DEG_TO_RAD;
+    const float sinHeading = sinf(heading);
+    const float cosHeading = cosf(heading);
+    int16_t noseX = 0;
+    int16_t noseY = 0;
+    planeRadarNoseTip(x, y, headingDeg, noseX, noseY);
+    const int16_t baseX = x - static_cast<int16_t>(lroundf(sinHeading * PlaneRadarTheme::aircraftTailLength));
+    const int16_t baseY = y + static_cast<int16_t>(lroundf(cosHeading * PlaneRadarTheme::aircraftTailLength));
+    const int16_t wingX = static_cast<int16_t>(lroundf(cosHeading * PlaneRadarTheme::aircraftTailHalfWidth));
+    const int16_t wingY = static_cast<int16_t>(lroundf(sinHeading * PlaneRadarTheme::aircraftTailHalfWidth));
+
+    canvas.fillTriangle(noseX,
+                        noseY,
+                        baseX + wingX,
+                        baseY + wingY,
+                        baseX - wingX,
+                        baseY - wingY,
+                        aircraftColor);
+    (void)selected;
+    (void)selectedColor;
+}
+
+void RadarRenderer::drawPlaneRadarSpeedVector(TFT_eSprite &canvas,
+                                              const Aircraft &target,
+                                              int16_t x,
+                                              int16_t y,
+                                              const AppConfig &config,
+                                              uint16_t vectorColor)
+{
+    if (!isfinite(target.speedMs) || target.speedMs <= 0.0f)
+    {
+        return;
+    }
+
+    const float headingDeg = isfinite(target.headingDeg) ? target.headingDeg : target.bearingDeg;
+    const float heading = headingDeg * DEG_TO_RAD;
+    int16_t startX = 0;
+    int16_t startY = 0;
+    planeRadarNoseTip(x, y, headingDeg, startX, startY);
+
+    const int length = planeRadarSpeedVectorLengthPx(target.speedMs, config);
+    int16_t endX = startX + static_cast<int16_t>(lroundf(sinf(heading) * length));
+    int16_t endY = startY - static_cast<int16_t>(lroundf(cosf(heading) * length));
+    clipPlaneRadarPointToOuterRing(startX, startY, endX, endY);
+    if (endX == startX && endY == startY)
+    {
+        return;
+    }
+
+    drawModernWideLine(canvas, startX, startY, endX, endY, vectorColor, 2);
+}
+
+void RadarRenderer::drawPlaneRadarAircraftLabel(TFT_eSprite &canvas,
+                                                const Aircraft &target,
+                                                int16_t x,
+                                                int16_t y,
+                                                bool selected,
+                                                LabelRect *usedLabels,
+                                                uint8_t &usedLabelCount,
+                                                uint16_t textColor,
+                                                uint16_t typeColor,
+                                                uint16_t backgroundColor)
+{
+    char callsign[16];
+    char middleLine[16];
+    char altitude[16];
+    snprintf(callsign, sizeof(callsign), "%s", target.callsign[0] != '\0' ? target.callsign : "UNKNOWN");
+    if (target.type[0] != '\0')
+    {
+        snprintf(middleLine, sizeof(middleLine), "%s", target.type);
+    }
+    else if (isfinite(target.speedMs))
+    {
+        snprintf(middleLine, sizeof(middleLine), "%.0fkt", target.speedMs * 1.943844f);
+    }
+    else
+    {
+        snprintf(middleLine, sizeof(middleLine), "--");
+    }
+    formatPlaneRadarAltitude(target.altitudeM, altitude, sizeof(altitude));
+
+    canvas.setFreeFont(nullptr);
+    canvas.setTextSize(1);
+    constexpr uint8_t tagFont = 1;
+    const int16_t lineHeight = 11;
+    const int16_t labelWidth = max(max(canvas.textWidth(callsign, tagFont),
+                                       canvas.textWidth(middleLine, tagFont)),
+                                   canvas.textWidth(altitude, tagFont));
+    const int16_t blockHeight = lineHeight * 3;
+    const int16_t symbolHalf = PlaneRadarTheme::aircraftNoseLength +
+                               PlaneRadarTheme::aircraftTailHalfWidth;
+    const bool labelRight = x < PlaneRadarTheme::centerX;
+    int16_t labelX = 0;
+    int16_t labelY = constrain(y - blockHeight / 2, 1, PlaneRadarTheme::size - blockHeight - 1);
+    LabelRect rect = {0, 0, 0, 0};
+
+    if (labelRight)
+    {
+        labelX = x + symbolHalf + PlaneRadarTheme::aircraftLabelGap;
+        labelX = min<int16_t>(labelX, PlaneRadarTheme::size - labelWidth - 1);
+        rect = {labelX, labelY, static_cast<int16_t>(labelWidth + 1), blockHeight};
+        canvas.setTextDatum(TL_DATUM);
+    }
+    else
+    {
+        labelX = x - symbolHalf - PlaneRadarTheme::aircraftLabelGap;
+        labelX = max<int16_t>(labelX, labelWidth + 1);
+        rect = {static_cast<int16_t>(labelX - labelWidth), labelY, static_cast<int16_t>(labelWidth + 1), blockHeight};
+        canvas.setTextDatum(TR_DATUM);
+    }
+
+    (void)reserveLabelRect(usedLabels, usedLabelCount, rect);
+    (void)selected;
+
+    canvas.setTextColor(textColor, backgroundColor);
+    canvas.drawString(callsign, labelX, labelY, tagFont);
+    labelY += lineHeight;
+    canvas.setTextColor(typeColor, backgroundColor);
+    canvas.drawString(middleLine, labelX, labelY, tagFont);
+    labelY += lineHeight;
+    canvas.setTextColor(tft_.color565(255, 200, 0), backgroundColor);
+    canvas.drawString(altitude, labelX, labelY, tagFont);
+}
+
+void RadarRenderer::drawPlaneRadarBeyondDot(TFT_eSprite &canvas,
+                                            const Aircraft &target,
+                                            uint16_t aircraftColor)
+{
+    if (!isfinite(target.bearingDeg))
+    {
+        return;
+    }
+
+    const float bearing = target.bearingDeg * DEG_TO_RAD;
+    const int16_t rimRadius = PlaneRadarTheme::centerX - PlaneRadarTheme::beyondRingScreenMargin;
+    const int16_t x = PlaneRadarTheme::centerX +
+                      static_cast<int16_t>(lroundf(sinf(bearing) * rimRadius));
+    const int16_t y = PlaneRadarTheme::centerY -
+                      static_cast<int16_t>(lroundf(cosf(bearing) * rimRadius));
+    canvas.fillCircle(x, y, PlaneRadarTheme::beyondRingDotRadius, aircraftColor);
+}
+
+bool RadarRenderer::planeRadarToScreen(const Aircraft &target,
+                                       const AppConfig &config,
+                                       int16_t &x,
+                                       int16_t &y,
+                                       bool &insideDisplayRange) const
+{
+    if (!target.valid || !isfinite(target.distanceKm) || !isfinite(target.bearingDeg))
+    {
+        return false;
+    }
+
+    const float outerRangeKm = planeRadarOuterRangeKm(config);
+    const float fetchRangeKm = outerRangeKm * 1.25f;
+    if (target.distanceKm > fetchRangeKm)
+    {
+        return false;
+    }
+
+    insideDisplayRange = target.distanceKm <= planeRadarInnerRangeKm(config);
+    const float radius = constrain((target.distanceKm / outerRangeKm) *
+                                       static_cast<float>(PlaneRadarTheme::outerRadius),
+                                   0.0f,
+                                   static_cast<float>(PlaneRadarTheme::outerRadius));
+    const float bearing = target.bearingDeg * DEG_TO_RAD;
+    x = PlaneRadarTheme::centerX + static_cast<int16_t>(lroundf(sinf(bearing) * radius));
+    y = PlaneRadarTheme::centerY - static_cast<int16_t>(lroundf(cosf(bearing) * radius));
+    return true;
+}
+
+int RadarRenderer::planeRadarSpeedVectorLengthPx(float speedMs, const AppConfig &config) const
+{
+    if (!isfinite(speedMs) || speedMs <= 0.0f)
+    {
+        return 0;
+    }
+
+    (void)config;
+
+    const float knots = speedMs * 1.943844f;
+    constexpr float kmPerKnotPerHorizon = 1.852f *
+                                          static_cast<float>(PlaneRadarTheme::trackHorizonSec) /
+                                          3600.0f;
+    const float px = knots *
+                     kmPerKnotPerHorizon *
+                     static_cast<float>(PlaneRadarTheme::outerRadius) /
+                     PlaneRadarTheme::trackRefOuterKm *
+                     PlaneRadarTheme::trackLengthScale;
+    const int length = static_cast<int>(px + 0.5f);
+    if (length < PlaneRadarTheme::speedLineMinPx)
+    {
+        return PlaneRadarTheme::speedLineMinPx;
+    }
+    return length;
+}
+
+void RadarRenderer::planeRadarNoseTip(int16_t x,
+                                      int16_t y,
+                                      float headingDeg,
+                                      int16_t &tipX,
+                                      int16_t &tipY) const
+{
+    const float heading = headingDeg * DEG_TO_RAD;
+    tipX = x + static_cast<int16_t>(lroundf(sinf(heading) * PlaneRadarTheme::aircraftNoseLength));
+    tipY = y - static_cast<int16_t>(lroundf(cosf(heading) * PlaneRadarTheme::aircraftNoseLength));
+}
+
+void RadarRenderer::clipPlaneRadarPointToOuterRing(int16_t x0,
+                                                   int16_t y0,
+                                                   int16_t &x1,
+                                                   int16_t &y1) const
+{
+    const float dx = static_cast<float>(x1 - x0);
+    const float dy = static_cast<float>(y1 - y0);
+    const float endDx = static_cast<float>(x1 - PlaneRadarTheme::centerX);
+    const float endDy = static_cast<float>(y1 - PlaneRadarTheme::centerY);
+    const int16_t radius = PlaneRadarTheme::outerRadius;
+    const float limit = static_cast<float>(radius * radius);
+
+    if (endDx * endDx + endDy * endDy <= limit)
+    {
+        return;
+    }
+
+    float low = 0.0f;
+    float high = 1.0f;
+    for (uint8_t i = 0; i < 8; ++i)
+    {
+        const float mid = (low + high) * 0.5f;
+        const float testX = static_cast<float>(x0) + dx * mid - PlaneRadarTheme::centerX;
+        const float testY = static_cast<float>(y0) + dy * mid - PlaneRadarTheme::centerY;
+        if (testX * testX + testY * testY <= limit)
+        {
+            low = mid;
+        }
+        else
+        {
+            high = mid;
+        }
+    }
+
+    x1 = x0 + static_cast<int16_t>(dx * low);
+    y1 = y0 + static_cast<int16_t>(dy * low);
+}
+
+void RadarRenderer::formatPlaneRadarAltitude(float altitudeM, char *buffer, size_t bufferSize) const
+{
+    if (buffer == nullptr || bufferSize == 0)
+    {
+        return;
+    }
+
+    if (!isfinite(altitudeM))
+    {
+        snprintf(buffer, bufferSize, "--");
+        return;
+    }
+
+    const int altitudeFt = static_cast<int>(altitudeM * 3.28084f);
+    snprintf(buffer, bufferSize, "%dft", altitudeFt);
+}
+
+void RadarRenderer::renderPlaneRadarStatusText(TFT_eSprite &canvas,
+                                               const char *statusText,
+                                               uint16_t textColor,
+                                               uint16_t backgroundColor)
+{
+    if (statusText == nullptr || statusText[0] == '\0')
+    {
+        return;
+    }
+
+    char status[32];
+    snprintf(status, sizeof(status), "%s", statusText);
+    char *secondLine = strchr(status, '\n');
+
+    canvas.setTextDatum(BC_DATUM);
+    canvas.setTextColor(textColor, backgroundColor);
+    if (secondLine != nullptr)
+    {
+        *secondLine = '\0';
+        ++secondLine;
+        canvas.drawString(status, PlaneRadarTheme::centerX, 214, 1);
+        canvas.drawString(secondLine, PlaneRadarTheme::centerX, 226, 1);
+    }
+    else
+    {
+        canvas.drawString(status, PlaneRadarTheme::centerX, 226, 1);
+    }
+}
+
+void RadarRenderer::renderOriginalRunwayOverlay(TFT_eSprite &canvas)
+{
+    (void)canvas;
+    // TODO: add a lightweight runway overlay if local airport runway data is introduced.
 }
 
 void RadarRenderer::renderCyberpunkRadarFrame(const Aircraft *aircraft,
@@ -1528,7 +2152,18 @@ void RadarRenderer::drawCyberpunkStatusText(TFT_eSprite &canvas,
 
     canvas.setTextDatum(BC_DATUM);
     canvas.setTextColor(cyberAltitudeColor(), cyberBackgroundColor());
-    canvas.drawString(status, CyberpunkRadarTheme::centerX, 226, 1);
+    char *secondLine = strchr(status, '\n');
+    if (secondLine != nullptr)
+    {
+        *secondLine = '\0';
+        ++secondLine;
+        canvas.drawString(status, CyberpunkRadarTheme::centerX, 216, 1);
+        canvas.drawString(secondLine, CyberpunkRadarTheme::centerX, 228, 1);
+    }
+    else
+    {
+        canvas.drawString(status, CyberpunkRadarTheme::centerX, 226, 1);
+    }
     canvas.setTextDatum(MR_DATUM);
     canvas.drawString(range, CyberpunkRadarTheme::centerX + cyberpunkTuning().outerRadius - 8, CyberpunkRadarTheme::centerY + 12, 1);
 }
@@ -2392,7 +3027,21 @@ void RadarRenderer::drawStatusText(TFT_eSprite &canvas, const char *statusText)
         return;
     }
 
+    char status[32];
+    snprintf(status, sizeof(status), "%s", statusText);
+    char *secondLine = strchr(status, '\n');
+
     canvas.setTextDatum(BC_DATUM);
     canvas.setTextColor(labelGreen_, TFT_BLACK);
-    canvas.drawString(statusText, kCenterX, 226, 1);
+    if (secondLine != nullptr)
+    {
+        *secondLine = '\0';
+        ++secondLine;
+        canvas.drawString(status, kCenterX, 216, 1);
+        canvas.drawString(secondLine, kCenterX, 228, 1);
+    }
+    else
+    {
+        canvas.drawString(status, kCenterX, 226, 1);
+    }
 }

@@ -2841,7 +2841,17 @@ void RadarApp::updateRealRadarStatus()
 
     if (realAircraftCount_ == 0)
     {
-        snprintf(realRadarStatus_, sizeof(realRadarStatus_), "NO AIRBORNE");
+        if (lastRealRadarFilteredCount_ > 0)
+        {
+            snprintf(realRadarStatus_,
+                     sizeof(realRadarStatus_),
+                     "NO AIRBORNE\nFILTERED %u",
+                     lastRealRadarFilteredCount_);
+        }
+        else
+        {
+            snprintf(realRadarStatus_, sizeof(realRadarStatus_), "NO AIRBORNE");
+        }
         return;
     }
 
@@ -2935,6 +2945,10 @@ void RadarApp::rebuildRealRadarAircraft(RealRadarTrackStats &stats)
                                                          realAircraft_,
                                                          AircraftModel::kAircraftCount,
                                                          stats);
+    lastRealRadarFilteredCount_ = stats.filteredGround +
+                                  stats.filteredAltitude +
+                                  stats.filteredSpeed +
+                                  stats.filteredRange;
 }
 
 void RadarApp::printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const RealRadarTrackStats &stats)

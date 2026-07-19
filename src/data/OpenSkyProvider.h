@@ -10,6 +10,7 @@ struct ApiAircraft
 {
     char icao24[8];
     char callsign[12];
+    char type[8];
     float lat;
     float lon;
     float altitudeM;

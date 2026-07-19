@@ -5,6 +5,7 @@
 struct Aircraft
 {
     char callsign[12];
+    char type[8];
     float distanceKm;
     float bearingDeg;
     float altitudeM;
