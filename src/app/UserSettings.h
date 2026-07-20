@@ -66,6 +66,7 @@ struct LocationSettings
     float centerLat;
     float centerLon;
     float maxRangeKm;
+    float fetchRangeKm;
     float rangePresetsKm[3];
     float queryLatMin;
     float queryLonMin;
@@ -107,6 +108,7 @@ struct DisplaySettings
     UiTheme uiTheme;
     uint8_t maxAircraftToDisplay;
     bool showLabels;
+    bool showEdgeDots;
     uint8_t brightness;
 };
 
@@ -154,6 +156,9 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config);
 bool validateUserSettings(const UserSettings &settings);
 void sanitizeUserSettings(UserSettings &settings);
 void updateQueryBoxFromCenterRange(UserSettings &settings);
+bool uiThemeSupportsEdgeDots(UiTheme theme);
+float maxAllowedFetchRangeKm(const UserSettings &settings);
+float effectiveFetchRangeKm(const UserSettings &settings);
 uint32_t computeActiveSecondsPerDay(const ScheduleSettings &schedule);
 bool isWithinSchedule(const ScheduleSettings &schedule, int16_t localMinutesOfDay);
 int16_t computeNextScheduleStartMinutes(const ScheduleSettings &schedule, int16_t localMinutesOfDay);

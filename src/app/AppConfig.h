@@ -20,6 +20,8 @@ struct AppConfig
     AppMode appMode = AppMode::RealRadar;
     DisplayMode displayMode = DisplayMode::ClassicRadar;
     float maxRangeKm = 60.0f;
+    float fetchRangeKm = 80.0f;
+    bool showEdgeDots = true;
     bool showGroundTraffic = false;
     float minAirborneAltitudeM = 100.0f;
     float minAirborneSpeedMs = 30.0f;

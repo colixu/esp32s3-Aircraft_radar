@@ -70,11 +70,13 @@ bool SettingsStore::load(UserSettings &settings)
                                                                            static_cast<uint8_t>(settings.display.uiTheme)));
     settings.display.maxAircraftToDisplay = preferences_.getUChar("maxac", settings.display.maxAircraftToDisplay);
     settings.display.showLabels = preferences_.getBool("labels", settings.display.showLabels);
+    settings.display.showEdgeDots = preferences_.getBool("edgeDots", settings.display.showEdgeDots);
     settings.display.brightness = preferences_.getUChar("bright", settings.display.brightness);
 
     settings.location.centerLat = preferences_.getFloat("clat", settings.location.centerLat);
     settings.location.centerLon = preferences_.getFloat("clon", settings.location.centerLon);
     settings.location.maxRangeKm = preferences_.getFloat("range", settings.location.maxRangeKm);
+    settings.location.fetchRangeKm = preferences_.getFloat("fetchKm", settings.location.fetchRangeKm);
     settings.location.rangePresetsKm[0] = preferences_.getFloat("rng0", settings.location.rangePresetsKm[0]);
     settings.location.rangePresetsKm[1] = preferences_.getFloat("rng1", settings.location.rangePresetsKm[1]);
     settings.location.rangePresetsKm[2] = preferences_.getFloat("rng2", settings.location.rangePresetsKm[2]);
@@ -154,11 +156,13 @@ bool SettingsStore::save(const UserSettings &settings)
     preferences_.putUChar("ui", static_cast<uint8_t>(settings.display.uiTheme));
     preferences_.putUChar("maxac", settings.display.maxAircraftToDisplay);
     preferences_.putBool("labels", settings.display.showLabels);
+    preferences_.putBool("edgeDots", settings.display.showEdgeDots);
     preferences_.putUChar("bright", settings.display.brightness);
 
     preferences_.putFloat("clat", settings.location.centerLat);
     preferences_.putFloat("clon", settings.location.centerLon);
     preferences_.putFloat("range", settings.location.maxRangeKm);
+    preferences_.putFloat("fetchKm", settings.location.fetchRangeKm);
     preferences_.putFloat("rng0", settings.location.rangePresetsKm[0]);
     preferences_.putFloat("rng1", settings.location.rangePresetsKm[1]);
     preferences_.putFloat("rng2", settings.location.rangePresetsKm[2]);
@@ -208,16 +212,20 @@ bool SettingsStore::save(const UserSettings &settings)
     preferences_.putString("ssid", settings.wifi.ssid);
     preferences_.putString("wpass", settings.wifi.password);
 
-    DebugLog::printf("Settings saved to NVS: ui=%s range=%.0fkm ground=%u idle=%s\r\n",
+    DebugLog::printf("Settings saved to NVS: ui=%s range=%.0fkm fetch=%.0fkm edgeDots=%u ground=%u idle=%s\r\n",
                      uiThemeName(settings.display.uiTheme),
                      settings.location.maxRangeKm,
+                     settings.location.fetchRangeKm,
+                     settings.display.showEdgeDots ? 1 : 0,
                      settings.filter.showGroundTraffic ? 1 : 0,
                      scheduleIdleDisplayModeName(settings.schedule.idleDisplayMode));
     return true;
 #else
-    DebugLog::printf("SettingsStore save skipped: NVS disabled, volatile mode. ui=%s range=%.0fkm ground=%u idle=%s\r\n",
+    DebugLog::printf("SettingsStore save skipped: NVS disabled, volatile mode. ui=%s range=%.0fkm fetch=%.0fkm edgeDots=%u ground=%u idle=%s\r\n",
                      uiThemeName(settings.display.uiTheme),
                      settings.location.maxRangeKm,
+                     settings.location.fetchRangeKm,
+                     settings.display.showEdgeDots ? 1 : 0,
                      settings.filter.showGroundTraffic ? 1 : 0,
                      scheduleIdleDisplayModeName(settings.schedule.idleDisplayMode));
     return true;

@@ -119,7 +119,7 @@ const char *AdsbFiProvider::lastError() const
 
 String AdsbFiProvider::buildUrl(const UserSettings &settings) const
 {
-    const uint16_t distanceNm = clampSearchDistanceNm(settings.location.maxRangeKm);
+    const uint16_t distanceNm = clampSearchDistanceNm(effectiveFetchRangeKm(settings));
     String url = "https://opendata.adsb.fi/api/v3/lat/";
     url += String(settings.location.centerLat, 5);
     url += "/lon/";

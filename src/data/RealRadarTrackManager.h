@@ -49,6 +49,7 @@ struct RealRadarTrackStats
     uint16_t filteredAltitude = 0;
     uint16_t filteredSpeed = 0;
     uint16_t filteredRange = 0;
+    uint16_t edgeDotCandidates = 0;
     uint8_t matchedTracks = 0;
     uint8_t newTracks = 0;
     uint8_t correctionStartedCount = 0;

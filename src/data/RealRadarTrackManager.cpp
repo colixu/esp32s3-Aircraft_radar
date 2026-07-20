@@ -265,6 +265,8 @@ uint8_t RealRadarTrackManager::buildAircraft(const UserSettings &settings,
 {
     AircraftModel::clearAircraft(aircraft, aircraftCapacity);
     uint8_t aircraftCount = 0;
+    const float displayRangeKm = settings.location.maxRangeKm;
+    const float aircraftRangeKm = effectiveFetchRangeKm(settings);
 
     for (uint8_t i = 0; i < kMaxTracks; ++i)
     {
@@ -286,7 +288,7 @@ uint8_t RealRadarTrackManager::buildAircraft(const UserSettings &settings,
             continue;
         }
 
-        if (distanceKm > settings.location.maxRangeKm)
+        if (distanceKm > aircraftRangeKm)
         {
             ++stats.filteredRange;
             continue;
@@ -311,6 +313,11 @@ uint8_t RealRadarTrackManager::buildAircraft(const UserSettings &settings,
                 ++stats.filteredSpeed;
                 continue;
             }
+        }
+
+        if (distanceKm > displayRangeKm)
+        {
+            ++stats.edgeDotCandidates;
         }
 
         addAircraftSorted(aircraft, aircraftCapacity, aircraftCount, track, distanceKm, bearingDeg);

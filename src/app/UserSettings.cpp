@@ -125,6 +125,7 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.location.centerLat = config.radarCenterLat;
     settings.location.centerLon = config.radarCenterLon;
     settings.location.maxRangeKm = config.maxRangeKm;
+    settings.location.fetchRangeKm = settings.location.maxRangeKm * 4.0f / 3.0f;
     settings.location.rangePresetsKm[0] = 30.0f;
     settings.location.rangePresetsKm[1] = 60.0f;
     settings.location.rangePresetsKm[2] = 120.0f;
@@ -151,6 +152,7 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.display.uiTheme = UiTheme::ClassicRadar;
     settings.display.maxAircraftToDisplay = AircraftModel::kAircraftCount;
     settings.display.showLabels = config.showLabels;
+    settings.display.showEdgeDots = true;
     settings.display.brightness = 255;
 
     settings.filter.showGroundTraffic = config.showGroundTraffic;
@@ -172,6 +174,7 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.system.serialDebug = true;
 
     sanitizeUserSettings(settings);
+    updateQueryBoxFromCenterRange(settings);
 }
 
 bool validateUserSettings(const UserSettings &settings)
@@ -186,6 +189,9 @@ void sanitizeUserSettings(UserSettings &settings)
     settings.location.centerLat = clampValue(settings.location.centerLat, -90.0f, 90.0f);
     settings.location.centerLon = clampValue(settings.location.centerLon, -180.0f, 180.0f);
     settings.location.maxRangeKm = clampValue(settings.location.maxRangeKm, 5.0f, 300.0f);
+    settings.location.fetchRangeKm = clampValue(settings.location.fetchRangeKm,
+                                                settings.location.maxRangeKm,
+                                                maxAllowedFetchRangeKm(settings));
     sanitizeRangePresets(settings.location);
 
     settings.location.queryLatMin = clampValue(settings.location.queryLatMin, -90.0f, 90.0f);
@@ -280,16 +286,46 @@ void updateQueryBoxFromCenterRange(UserSettings &settings)
     settings.location.centerLat = clampValue(settings.location.centerLat, -90.0f, 90.0f);
     settings.location.centerLon = clampValue(settings.location.centerLon, -180.0f, 180.0f);
     settings.location.maxRangeKm = clampValue(settings.location.maxRangeKm, 5.0f, 300.0f);
+    settings.location.fetchRangeKm = clampValue(settings.location.fetchRangeKm,
+                                                settings.location.maxRangeKm,
+                                                maxAllowedFetchRangeKm(settings));
 
-    const float latDelta = settings.location.maxRangeKm / 111.32f;
+    const float queryRangeKm = effectiveFetchRangeKm(settings);
+    const float latDelta = queryRangeKm / 111.32f;
     const float latRadians = settings.location.centerLat * DEG_TO_RAD;
     const float cosLat = max(0.05f, fabsf(cosf(latRadians)));
-    const float lonDelta = settings.location.maxRangeKm / (111.32f * cosLat);
+    const float lonDelta = queryRangeKm / (111.32f * cosLat);
 
     settings.location.queryLatMin = clampValue(settings.location.centerLat - latDelta, -90.0f, 90.0f);
     settings.location.queryLatMax = clampValue(settings.location.centerLat + latDelta, -90.0f, 90.0f);
     settings.location.queryLonMin = clampValue(settings.location.centerLon - lonDelta, -180.0f, 180.0f);
     settings.location.queryLonMax = clampValue(settings.location.centerLon + lonDelta, -180.0f, 180.0f);
+}
+
+bool uiThemeSupportsEdgeDots(UiTheme theme)
+{
+    return theme == UiTheme::ModernRadar || theme == UiTheme::PlaneRadar;
+}
+
+float maxAllowedFetchRangeKm(const UserSettings &settings)
+{
+    const float displayRangeKm = max(settings.location.maxRangeKm, 1.0f);
+    return min(displayRangeKm * 1.5f, 300.0f);
+}
+
+float effectiveFetchRangeKm(const UserSettings &settings)
+{
+    if (!settings.display.showEdgeDots)
+    {
+        return settings.location.maxRangeKm;
+    }
+
+    if (!uiThemeSupportsEdgeDots(settings.display.uiTheme))
+    {
+        return settings.location.maxRangeKm;
+    }
+
+    return settings.location.fetchRangeKm;
 }
 
 uint32_t computeActiveSecondsPerDay(const ScheduleSettings &schedule)
@@ -401,6 +437,12 @@ void printUserSettings(const UserSettings &settings)
                      settings.location.rangePresetsKm[0],
                      settings.location.rangePresetsKm[1],
                      settings.location.rangePresetsKm[2]);
+    DebugLog::printf("[Range] display=%.0fkm fetch=%.0fkm effectiveFetch=%.0fkm edgeDots=%u supported=%u\r\n",
+                     settings.location.maxRangeKm,
+                     settings.location.fetchRangeKm,
+                     effectiveFetchRangeKm(settings),
+                     settings.display.showEdgeDots ? 1 : 0,
+                     uiThemeSupportsEdgeDots(settings.display.uiTheme) ? 1 : 0);
     DebugLog::printf("  api=%s account=%s client_id_set=%u client_secret_set=%u\r\n",
                      apiProviderName(settings.api.provider),
                      apiAccountModeName(settings.api.accountMode),

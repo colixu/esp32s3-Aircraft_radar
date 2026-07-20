@@ -264,16 +264,26 @@ private:
                                    int16_t y,
                                    const AppConfig &config,
                                    uint16_t vectorColor);
-    void drawPlaneRadarAircraftLabel(TFT_eSprite &canvas,
-                                     const Aircraft &target,
-                                     int16_t x,
-                                     int16_t y,
-                                     bool selected,
-                                     LabelRect *usedLabels,
-                                     uint8_t &usedLabelCount,
-                                     uint16_t textColor,
-                                     uint16_t typeColor,
-                                     uint16_t backgroundColor);
+    void buildPlaneRadarLabelText(const Aircraft &target,
+                                  char *callsign,
+                                  size_t callsignSize,
+                                  char *middleLine,
+                                  size_t middleLineSize,
+                                  char *altitude,
+                                  size_t altitudeSize) const;
+    bool tryDrawPlaneRadarAircraftLabel(TFT_eSprite &canvas,
+                                        const Aircraft &target,
+                                        int16_t x,
+                                        int16_t y,
+                                        bool selected,
+                                        LabelRect *usedLabels,
+                                        uint8_t &usedLabelCount,
+                                        uint8_t usedLabelCapacity,
+                                        uint16_t textColor,
+                                        uint16_t typeColor,
+                                        uint16_t backgroundColor,
+                                        bool highlight,
+                                        bool drawContent);
     void drawPlaneRadarBeyondDot(TFT_eSprite &canvas,
                                  const Aircraft &target,
                                  uint16_t aircraftColor);
@@ -369,7 +379,8 @@ private:
                                  uint8_t maxLabels) const;
     bool reserveLabelRect(LabelRect *usedLabels,
                           uint8_t &usedLabelCount,
-                          const LabelRect &candidate) const;
+                          const LabelRect &candidate,
+                          uint8_t capacity = kMaxTrackedLabels) const;
     bool labelsOverlap(const LabelRect &a, const LabelRect &b) const;
     void rotateCyberpunkAircraftPoint(float localX,
                                       float localY,

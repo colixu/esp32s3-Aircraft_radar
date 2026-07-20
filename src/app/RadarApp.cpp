@@ -387,10 +387,13 @@ void RadarApp::beginApiTest()
 void RadarApp::beginRealRadar()
 {
     DebugLog::println("Starting RealRadar mode.");
-    DebugLog::printf("Radar center: lat=%.5f lon=%.5f range=%.0fkm\r\n",
+    DebugLog::printf("Radar center: lat=%.5f lon=%.5f range=%.0fkm fetch=%.0fkm effectiveFetch=%.0fkm edgeDots=%u\r\n",
                      settings_.location.centerLat,
                      settings_.location.centerLon,
-                     settings_.location.maxRangeKm);
+                     settings_.location.maxRangeKm,
+                     settings_.location.fetchRangeKm,
+                     effectiveFetchRangeKm(settings_),
+                     settings_.display.showEdgeDots ? 1 : 0);
     DebugLog::printf("Provider: %s\r\n", apiProviderName(settings_.api.provider));
     DebugLog::printf("RealRadar filters: ground=%s minAlt=%.0fm minSpeed=%.1fm/s\r\n",
                      settings_.filter.showGroundTraffic ? "show" : "hide",
@@ -399,17 +402,17 @@ void RadarApp::beginRealRadar()
     if (settings_.api.provider == ApiProvider::OpenSky)
     {
         DebugLog::printf("OpenSky bbox: lat %.4f..%.4f lon %.4f..%.4f\r\n",
-                         config_.openSkyLamin,
-                         config_.openSkyLamax,
-                         config_.openSkyLomin,
-                         config_.openSkyLomax);
+                         settings_.location.queryLatMin,
+                         settings_.location.queryLatMax,
+                         settings_.location.queryLonMin,
+                         settings_.location.queryLonMax);
     }
     else if (settings_.api.provider == ApiProvider::AdsbFi)
     {
         DebugLog::printf("adsb.fi query center: lat=%.5f lon=%.5f range=%.0fkm\r\n",
                          settings_.location.centerLat,
                          settings_.location.centerLon,
-                         settings_.location.maxRangeKm);
+                         effectiveFetchRangeKm(settings_));
     }
     currentRealApiIntervalMs_ = activeRequestIntervalMs(settings_);
     DebugLog::printf("RealRadar API interval: %lu ms (%s)\r\n",
@@ -2041,8 +2044,15 @@ bool RadarApp::applyUiTuningValue(const char *key, const UiTuningCommand &comman
 void RadarApp::switchUiTheme()
 {
     settings_.display.uiTheme = nextUiTheme(settings_.display.uiTheme);
+    sanitizeUserSettings(settings_);
+    updateQueryBoxFromCenterRange(settings_);
     DebugLog::printf("UI theme switched: %s\r\n", uiThemeName(settings_.display.uiTheme));
     settingsStore_.save(settings_);
+
+    if (config_.appMode == AppMode::RealRadar && realApiUpdater_.isRunning())
+    {
+        realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_);
+    }
 
     if (config_.appMode == AppMode::RealRadar)
     {
@@ -2068,9 +2078,18 @@ void RadarApp::switchRange()
 
     const uint8_t nextPreset = (selectedPreset + 1) % 3;
     settings_.location.maxRangeKm = settings_.location.rangePresetsKm[nextPreset];
+    sanitizeUserSettings(settings_);
     updateQueryBoxFromCenterRange(settings_);
-    DebugLog::printf("Range switched: %.0fkm\r\n", settings_.location.maxRangeKm);
+    DebugLog::printf("Range switched: %.0fkm fetch=%.0fkm effectiveFetch=%.0fkm\r\n",
+                     settings_.location.maxRangeKm,
+                     settings_.location.fetchRangeKm,
+                     effectiveFetchRangeKm(settings_));
     settingsStore_.save(settings_);
+
+    if (config_.appMode == AppMode::RealRadar && realApiUpdater_.isRunning())
+    {
+        realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_);
+    }
 }
 
 void RadarApp::toggleGroundTraffic()
@@ -3234,13 +3253,18 @@ void RadarApp::printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const
                      stats.filteredAltitude,
                      stats.filteredSpeed,
                      stats.filteredRange);
-    DebugLog::printf("  rendered aircraft count=%u\r\n", stats.renderedAircraftCount);
+    DebugLog::printf("  rendered aircraft count=%u edge candidates=%u\r\n",
+                     stats.renderedAircraftCount,
+                     stats.edgeDotCandidates);
 }
 
 AppConfig RadarApp::runtimeRenderConfig() const
 {
     AppConfig renderConfig = config_;
     renderConfig.maxRangeKm = settings_.location.maxRangeKm;
+    renderConfig.fetchRangeKm = effectiveFetchRangeKm(settings_);
+    renderConfig.showEdgeDots = settings_.display.showEdgeDots &&
+                                uiThemeSupportsEdgeDots(settings_.display.uiTheme);
     renderConfig.showLabels = settings_.display.showLabels;
     return renderConfig;
 }

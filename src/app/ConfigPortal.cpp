@@ -262,13 +262,15 @@ void ConfigPortal::handleStatus()
         return;
     }
 
-    char body[512];
+    char body[1024];
     snprintf(body,
              sizeof(body),
              "{\"portalMode\":\"%s\",\"apSsid\":\"%s\",\"apIp\":\"%s\",\"staIp\":\"%s\","
              "\"wifiConfigured\":%s,\"wifiConnected\":%s,\"currentIP\":\"%s\","
              "\"apiProvider\":\"%s\",\"apiMode\":\"%s\",\"centerLat\":%.6f,\"centerLon\":%.6f,"
-             "\"maxRangeKm\":%.1f,\"scheduleEnabled\":%s,\"computedRequestIntervalMs\":%lu,"
+             "\"maxRangeKm\":%.1f,\"displayRangeKm\":%.1f,\"fetchRangeKm\":%.1f,"
+             "\"effectiveFetchRangeKm\":%.1f,\"showEdgeDots\":%s,\"edgeDotsSupportedByTheme\":%s,"
+             "\"scheduleEnabled\":%s,\"computedRequestIntervalMs\":%lu,"
              "\"activeRequestIntervalMs\":%lu,\"idleDisplayMode\":\"%s\","
              "\"nvsEnabled\":%s}",
              mode_ == ConfigPortalMode::ApSetup ? "ap_setup" : "sta_settings",
@@ -283,6 +285,11 @@ void ConfigPortal::handleStatus()
              settings_->location.centerLat,
              settings_->location.centerLon,
              settings_->location.maxRangeKm,
+             settings_->location.maxRangeKm,
+             settings_->location.fetchRangeKm,
+             effectiveFetchRangeKm(*settings_),
+             settings_->display.showEdgeDots ? "true" : "false",
+             uiThemeSupportsEdgeDots(settings_->display.uiTheme) ? "true" : "false",
              settings_->schedule.enabled ? "true" : "false",
              static_cast<unsigned long>(settings_->api.computedRequestIntervalMs),
              static_cast<unsigned long>(activeRequestIntervalMs(*settings_)),
@@ -443,6 +450,32 @@ void ConfigPortal::renderSimplePage()
     sendKmInput(text("Range preset 2", "档位 2"), "rangePreset2Km", value, "0.1");
     snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[2]);
     sendKmInput(text("Range preset 3", "档位 3"), "rangePreset3Km", value, "0.1");
+    write("<p class=\"hint\">");
+    write(text("Display range controls where full aircraft symbols are drawn on the radar.",
+               "Display range controls where full aircraft symbols are drawn on the radar."));
+    write("</p>");
+    sendCheckbox(text("Edge dots", "Edge dots"), "edgeDots", settings.display.showEdgeDots);
+    write("<p class=\"hint\">");
+    write(text("Show aircraft just outside the display range as small direction dots at the radar edge. Edge dots indicate direction only, not exact position.",
+               "Show aircraft just outside the display range as small direction dots at the radar edge. Edge dots indicate direction only, not exact position."));
+    write("</p>");
+    snprintf(value, sizeof(value), "%.1f", settings.location.fetchRangeKm);
+    char rangeLimit[16];
+    write("<label>");
+    write(text("Fetch range", "Fetch range"));
+    write("<span class=\"unit\"><input name=\"fetchRangeKm\" type=\"number\" min=\"");
+    snprintf(rangeLimit, sizeof(rangeLimit), "%.1f", settings.location.maxRangeKm);
+    write(rangeLimit);
+    write("\" max=\"");
+    snprintf(rangeLimit, sizeof(rangeLimit), "%.1f", maxAllowedFetchRangeKm(settings));
+    write(rangeLimit);
+    write("\" step=\"1\" value=\"");
+    write(value);
+    write("\"><span>km</span></span></label>");
+    write("<p class=\"hint\">");
+    write(text("Fetch range is the actual API query range. It is clamped between display range and 1.5x display range, up to 300km.",
+               "Fetch range is the actual API query range. It is clamped between display range and 1.5x display range, up to 300km."));
+    write("</p>");
     write("</fieldset>");
 
     write("<fieldset><legend>");
@@ -789,7 +822,8 @@ void ConfigPortal::applySimpleFormToSettings()
     {
         settings.location.maxRangeKm = settings.location.rangePresetsKm[selectedRangePreset];
     }
-    updateQueryBoxFromCenterRange(settings);
+    settings.location.fetchRangeKm = argToFloat("fetchRangeKm", settings.location.fetchRangeKm);
+    settings.display.showEdgeDots = hasCheckedArg("edgeDots");
 
     const String dataSource = server_.hasArg("dataSource") ? server_.arg("dataSource") : "adsbfi";
     settings.api.provider = dataSource == "opensky" ? ApiProvider::OpenSky : ApiProvider::AdsbFi;
@@ -838,6 +872,8 @@ void ConfigPortal::applySimpleFormToSettings()
 
     settings.display.uiTheme = static_cast<UiTheme>(argToInt("uiTheme", static_cast<int>(settings.display.uiTheme)));
     settings.display.brightness = static_cast<uint8_t>(argToInt("brightness", settings.display.brightness));
+    sanitizeUserSettings(settings);
+    updateQueryBoxFromCenterRange(settings);
 }
 
 void ConfigPortal::applyAdvancedFormToSettings()
