@@ -755,7 +755,8 @@ void RadarApp::handleBootButtonInputEvent(InputEvent event)
         case InputEvent::BootButtonShort:
             if (hasActiveOverlay())
             {
-                DebugLog::println("[Input] BOOT short ignored: settings view is active.");
+                DebugLog::println("[Input] BOOT short: close settings view");
+                closeSettingsEntryFromBootButton();
                 return;
             }
 
@@ -770,7 +771,8 @@ void RadarApp::handleBootButtonInputEvent(InputEvent event)
         case InputEvent::BootButtonDouble:
             if (hasActiveOverlay())
             {
-                DebugLog::println("[Input] BOOT double ignored: settings view is active.");
+                DebugLog::println("[Input] BOOT double: close settings view");
+                closeSettingsEntryFromBootButton();
                 return;
             }
 
@@ -786,6 +788,13 @@ void RadarApp::handleBootButtonInputEvent(InputEvent event)
             break;
 
         case InputEvent::BootButtonLong:
+            if (hasActiveOverlay())
+            {
+                DebugLog::println("[Input] BOOT long: close settings view");
+                closeSettingsEntryFromBootButton();
+                return;
+            }
+
             DebugLog::println("[Input] BOOT long: open settings QR");
             openSettingsEntryFromBootButton();
             break;
@@ -839,6 +848,21 @@ void RadarApp::openSettingsEntryFromBootButton()
     screenSleeping_ = false;
     setupPortalFromLocalMenu_ = true;
     enterSetupPortal("BOOT button");
+}
+
+void RadarApp::closeSettingsEntryFromBootButton()
+{
+    if (deviceState_ == DeviceState::SetupPortal)
+    {
+        setupPortalFromLocalMenu_ = true;
+        exitSetupPortal();
+        return;
+    }
+
+    if (staSettingsOverlayVisible_)
+    {
+        hideStaSettingsOverlay();
+    }
 }
 
 void RadarApp::openLocalMenu()

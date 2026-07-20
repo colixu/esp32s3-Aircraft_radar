@@ -8,10 +8,11 @@
 
 namespace
 {
-    constexpr uint32_t kBootDebounceMs = 30;
-    constexpr uint32_t kBootDoubleClickWindowMs = 350;
+    constexpr uint32_t kBootDebounceMs = 20;
+    constexpr uint32_t kBootDoubleClickWindowMs = 850;
     constexpr uint32_t kBootLongPressMs = 900;
     constexpr uint32_t kBootIgnoreAfterStartupMs = 500;
+    constexpr uint32_t kBootPostEventGuardMs = 100;
 
     bool serialDebugDisabledNotified = false;
 
@@ -74,6 +75,7 @@ void InputManager::begin(const UserSettings &settings)
     bootRawChangedMs_ = inputStartedMs_;
     bootPressStartedMs_ = 0;
     bootPendingClickMs_ = 0;
+    bootPostEventGuardUntilMs_ = 0;
     eventHead_ = 0;
     eventTail_ = 0;
     eventCount_ = 0;
@@ -85,6 +87,7 @@ void InputManager::begin(const UserSettings &settings)
     bootStablePressed_ = false;
     bootLongFired_ = false;
     bootPendingClick_ = false;
+    bootDoublePressArmed_ = false;
 
     if (buttonPin_ >= 0)
     {
@@ -579,9 +582,31 @@ void InputManager::updateBootButton()
         bootStablePressed_ = rawPressed;
         bootRawChangedMs_ = now;
         bootPressStartedMs_ = rawPressed ? now : 0;
+        bootPostEventGuardUntilMs_ = 0;
         bootLongFired_ = false;
         bootPendingClick_ = false;
+        bootDoublePressArmed_ = false;
         return;
+    }
+
+    if (bootPostEventGuardUntilMs_ != 0 && now < bootPostEventGuardUntilMs_)
+    {
+        if (!rawPressed)
+        {
+            bootLastRawPressed_ = false;
+            bootStablePressed_ = false;
+            bootRawChangedMs_ = now;
+        }
+        bootPressStartedMs_ = 0;
+        bootLongFired_ = false;
+        bootPendingClick_ = false;
+        bootDoublePressArmed_ = false;
+        return;
+    }
+
+    if (bootPostEventGuardUntilMs_ != 0 && now >= bootPostEventGuardUntilMs_)
+    {
+        bootPostEventGuardUntilMs_ = 0;
     }
 
     if (rawPressed != bootLastRawPressed_)
@@ -597,6 +622,20 @@ void InputManager::updateBootButton()
 
         if (bootStablePressed_)
         {
+            if (bootPendingClick_)
+            {
+                if (now - bootPendingClickMs_ <= kBootDoubleClickWindowMs)
+                {
+                    bootPendingClick_ = false;
+                    bootDoublePressArmed_ = true;
+                }
+                else
+                {
+                    bootPendingClick_ = false;
+                    pushEvent(InputEvent::BootButtonShort);
+                }
+            }
+
             bootPressStartedMs_ = now;
             bootLongFired_ = false;
         }
@@ -604,10 +643,10 @@ void InputManager::updateBootButton()
         {
             if (!bootLongFired_)
             {
-                if (bootPendingClick_ &&
-                    now - bootPendingClickMs_ <= kBootDoubleClickWindowMs)
+                if (bootDoublePressArmed_)
                 {
-                    bootPendingClick_ = false;
+                    bootDoublePressArmed_ = false;
+                    bootPostEventGuardUntilMs_ = now + kBootPostEventGuardMs;
                     pushEvent(InputEvent::BootButtonDouble);
                 }
                 else
@@ -629,10 +668,13 @@ void InputManager::updateBootButton()
     {
         bootLongFired_ = true;
         bootPendingClick_ = false;
+        bootDoublePressArmed_ = false;
+        bootPostEventGuardUntilMs_ = now + kBootPostEventGuardMs;
         pushEvent(InputEvent::BootButtonLong);
     }
 
     if (bootPendingClick_ &&
+        !bootStablePressed_ &&
         now - bootPendingClickMs_ > kBootDoubleClickWindowMs)
     {
         bootPendingClick_ = false;

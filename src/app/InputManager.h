@@ -30,6 +30,7 @@ private:
     uint32_t bootRawChangedMs_ = 0;
     uint32_t bootPressStartedMs_ = 0;
     uint32_t bootPendingClickMs_ = 0;
+    uint32_t bootPostEventGuardUntilMs_ = 0;
     InputEvent eventQueue_[kEventQueueSize] = {};
     uint8_t eventHead_ = 0;
     uint8_t eventTail_ = 0;
@@ -42,6 +43,7 @@ private:
     bool bootStablePressed_ = false;
     bool bootLongFired_ = false;
     bool bootPendingClick_ = false;
+    bool bootDoublePressArmed_ = false;
 
     void pushEvent(InputEvent event);
     void handleSerialInput(char command, Stream &serial);

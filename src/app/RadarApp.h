@@ -131,6 +131,7 @@ private:
     void handleBootButtonInputEvent(InputEvent event);
     void wakeScreenFromSleep();
     void openSettingsEntryFromBootButton();
+    void closeSettingsEntryFromBootButton();
     void openLocalMenu();
     void closeLocalMenu(bool restoreDisplay = true);
     void updateLocalMenu(uint32_t now);
