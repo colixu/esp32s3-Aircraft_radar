@@ -6,7 +6,7 @@ class WifiManagerSimple
 {
 public:
     void begin();
-    void begin(const char *ssid, const char *password);
+    void begin(const char *ssid, const char *password, uint8_t txPowerQuarterDbm = 60);
     void update(uint32_t now, uint32_t reconnectIntervalMs);
     void stop();
 
@@ -20,6 +20,7 @@ private:
     bool wasConnected_ = false;
     char ssid_[32] = "";
     char password_[64] = "";
+    uint8_t txPowerQuarterDbm_ = 60;
 
     void startConnect(uint32_t now);
 };

@@ -17,6 +17,9 @@ namespace
     constexpr uint32_t kLocalMenuTimeoutMs = 30000;
     constexpr uint32_t kLocalMenuOpenLongGuardMs = 8000;
     constexpr uint32_t kLocalMenuRefreshMs = 500;
+    constexpr uint32_t kSettingsEntryHoldMs = 2UL * 60UL * 1000UL;
+    constexpr uint32_t kBootWiFiConnectTimeoutMs = 15000;
+    constexpr uint32_t kBootWiFiConnectAnimFrameMs = 80;
     constexpr uint32_t kIdleThemePreviewMs = 30000;
     constexpr uint32_t kIdleRangePreviewMs = 10UL * 60UL * 1000UL;
     constexpr uint32_t kIdleRangePreviewRefreshMs = 10000;
@@ -214,25 +217,27 @@ void RadarApp::beginConfiguredMode()
 {
     if (config_.appMode == AppMode::ApiTest)
     {
-        if (!connectToConfiguredWiFi())
+        if (!hasConfiguredWiFi())
         {
+            DebugLog::println("[WiFi] No saved SSID, entering setup portal");
             enterSetupPortal("WiFi setup required");
             return;
         }
-        beginStaSettingsServer();
-        beginApiTest();
+
+        enterBootWiFiConnectState();
         return;
     }
 
     if (config_.appMode == AppMode::RealRadar)
     {
-        if (!connectToConfiguredWiFi())
+        if (!hasConfiguredWiFi())
         {
+            DebugLog::println("[WiFi] No saved SSID, entering setup portal");
             enterSetupPortal("WiFi setup required");
             return;
         }
-        beginStaSettingsServer();
-        beginRealRadar();
+
+        enterBootWiFiConnectState();
         return;
     }
 
@@ -263,6 +268,12 @@ void RadarApp::update()
         return;
     }
 
+    if (deviceState_ == DeviceState::ConnectWiFi)
+    {
+        updateConnectWiFi(now);
+        return;
+    }
+
     if (configPortal_.isRunning() && configPortal_.mode() == ConfigPortalMode::StaSettings)
     {
         configPortal_.update();
@@ -271,6 +282,7 @@ void RadarApp::update()
             delay(300);
             ESP.restart();
         }
+        updateSettingsEntryTimeout(now);
     }
 
     if (deviceState_ == DeviceState::SetupPortal)
@@ -326,6 +338,11 @@ uint32_t RadarApp::computeIdleDelayMs() const
         return 5;
     }
 
+    if (deviceState_ == DeviceState::ConnectWiFi)
+    {
+        return 5;
+    }
+
     if (deviceState_ == DeviceState::SetupPortal)
     {
         return 5;
@@ -357,6 +374,89 @@ uint32_t RadarApp::computeIdleDelayMs() const
     }
 
     return 1;
+}
+
+void RadarApp::enterBootWiFiConnectState()
+{
+    DebugLog::println("[WiFi] Saved SSID found, showing connect animation");
+    bootWiFiConnectStartedMs_ = millis();
+    lastBootWiFiConnectAnimFrameMs_ = 0;
+    bootConnectPendingAppStart_ = true;
+    screenSleeping_ = false;
+    setDeviceState(DeviceState::ConnectWiFi, "boot WiFi connect");
+
+    if (!renderer_.isReady())
+    {
+        renderer_.begin();
+    }
+
+    startWifiManagerFromSettings();
+    renderer_.renderWiFiConnectingFrame(settings_.wifi.ssid, 0, 1);
+}
+
+void RadarApp::updateConnectWiFi(uint32_t now)
+{
+    wifi_.update(now, config_.wifiReconnectIntervalMs);
+
+    if (wifi_.isConnected())
+    {
+        finishBootWiFiConnect(true);
+        return;
+    }
+
+    const uint32_t elapsedMs = now - bootWiFiConnectStartedMs_;
+    if (elapsedMs >= kBootWiFiConnectTimeoutMs)
+    {
+        DebugLog::println("[WiFi] Boot connect timeout, entering WiFiLost");
+        enterWiFiReconnectMode("boot WiFi timeout");
+        return;
+    }
+
+    if (lastBootWiFiConnectAnimFrameMs_ == 0 ||
+        now - lastBootWiFiConnectAnimFrameMs_ >= kBootWiFiConnectAnimFrameMs)
+    {
+        lastBootWiFiConnectAnimFrameMs_ = now;
+        const uint8_t attempt = static_cast<uint8_t>((elapsedMs / config_.wifiReconnectIntervalMs) + 1);
+        renderer_.renderWiFiConnectingFrame(settings_.wifi.ssid, elapsedMs, attempt);
+    }
+}
+
+void RadarApp::finishBootWiFiConnect(bool showEstablishedFrame)
+{
+    bootConnectPendingAppStart_ = false;
+    bootWiFiConnectStartedMs_ = 0;
+    lastBootWiFiConnectAnimFrameMs_ = 0;
+    wifiLostSinceMs_ = 0;
+
+    if (showEstablishedFrame)
+    {
+        DebugLog::printf("[WiFi] Connected during boot animation, IP=%s\r\n",
+                         WiFi.localIP().toString().c_str());
+    }
+    else
+    {
+        DebugLog::printf("[WiFi] Background reconnect ready, IP=%s\r\n",
+                         WiFi.localIP().toString().c_str());
+    }
+
+    if (showEstablishedFrame)
+    {
+        renderer_.renderSystemStatusFrame("LINK ESTABLISHED",
+                                          WiFi.localIP().toString().c_str(),
+                                          "",
+                                          settings_.display.uiTheme);
+        delay(400);
+    }
+
+    beginStaSettingsServer();
+    if (config_.appMode == AppMode::ApiTest)
+    {
+        beginApiTest();
+    }
+    else
+    {
+        beginRealRadar();
+    }
 }
 
 void RadarApp::beginRadarDemo()
@@ -756,6 +856,12 @@ void RadarApp::handleBootButtonInputEvent(InputEvent event)
     switch (event)
     {
         case InputEvent::BootButtonShort:
+            if (deviceState_ == DeviceState::ConnectWiFi)
+            {
+                DebugLog::println("[Input] BOOT short ignored during WiFi connect.");
+                return;
+            }
+
             if (hasActiveOverlay())
             {
                 DebugLog::println("[Input] BOOT short: close settings view");
@@ -772,6 +878,12 @@ void RadarApp::handleBootButtonInputEvent(InputEvent event)
             break;
 
         case InputEvent::BootButtonDouble:
+            if (deviceState_ == DeviceState::ConnectWiFi)
+            {
+                DebugLog::println("[Input] BOOT double ignored during WiFi connect.");
+                return;
+            }
+
             if (hasActiveOverlay())
             {
                 DebugLog::println("[Input] BOOT double: close settings view");
@@ -798,7 +910,14 @@ void RadarApp::handleBootButtonInputEvent(InputEvent event)
                 return;
             }
 
-            DebugLog::println("[Input] BOOT long: open settings QR");
+            if (deviceState_ == DeviceState::ConnectWiFi)
+            {
+                DebugLog::println("[WiFi] BOOT long during connect animation, entering setup portal");
+            }
+            else
+            {
+                DebugLog::println("[Input] BOOT long: open settings QR");
+            }
             openSettingsEntryFromBootButton();
             break;
 
@@ -845,16 +964,21 @@ void RadarApp::openSettingsEntryFromBootButton()
     if (wifi_.isConnected())
     {
         showStaSettingsOverlay();
+        armSettingsEntryTimeout(millis());
         return;
     }
 
+    DebugLog::println("[WiFi] BOOT long pressed, opening AP setup");
     screenSleeping_ = false;
     setupPortalFromLocalMenu_ = true;
     enterSetupPortal("BOOT button");
+    armSettingsEntryTimeout(millis());
 }
 
 void RadarApp::closeSettingsEntryFromBootButton()
 {
+    settingsEntryUntilMs_ = 0;
+
     if (deviceState_ == DeviceState::SetupPortal)
     {
         setupPortalFromLocalMenu_ = true;
@@ -866,6 +990,42 @@ void RadarApp::closeSettingsEntryFromBootButton()
     {
         hideStaSettingsOverlay();
     }
+}
+
+void RadarApp::armSettingsEntryTimeout(uint32_t now)
+{
+    settingsEntryUntilMs_ = now + kSettingsEntryHoldMs;
+    DebugLog::printf("Settings entry hold: %lu ms\r\n",
+                     static_cast<unsigned long>(kSettingsEntryHoldMs));
+}
+
+void RadarApp::updateSettingsEntryTimeout(uint32_t now)
+{
+    if (settingsEntryUntilMs_ == 0 || !hasActiveOverlay())
+    {
+        return;
+    }
+
+    if (static_cast<int32_t>(settingsEntryUntilMs_ - now) > 0)
+    {
+        return;
+    }
+
+    if (deviceState_ == DeviceState::SetupPortal &&
+        configPortal_.isRunning() &&
+        configPortal_.mode() == ConfigPortalMode::ApSetup)
+    {
+        const uint8_t stationCount = WiFi.softAPgetStationNum();
+        if (stationCount > 0)
+        {
+            settingsEntryUntilMs_ = now + kSettingsEntryHoldMs;
+            DebugLog::printf("Settings entry timeout extended: AP clients=%u\r\n", stationCount);
+            return;
+        }
+    }
+
+    DebugLog::println("Settings entry timeout.");
+    closeSettingsEntryFromBootButton();
 }
 
 void RadarApp::openLocalMenu()
@@ -2076,8 +2236,10 @@ void RadarApp::switchRange()
         }
     }
 
+    const float edgeExtensionKm = max(0.0f, settings_.location.fetchRangeKm - settings_.location.maxRangeKm);
     const uint8_t nextPreset = (selectedPreset + 1) % 3;
     settings_.location.maxRangeKm = settings_.location.rangePresetsKm[nextPreset];
+    settings_.location.fetchRangeKm = settings_.location.maxRangeKm + edgeExtensionKm;
     sanitizeUserSettings(settings_);
     updateQueryBoxFromCenterRange(settings_);
     DebugLog::printf("Range switched: %.0fkm fetch=%.0fkm effectiveFetch=%.0fkm\r\n",
@@ -2164,6 +2326,7 @@ void RadarApp::hideStaSettingsOverlay()
         return;
     }
 
+    settingsEntryUntilMs_ = 0;
     staSettingsOverlayVisible_ = false;
     DebugLog::println("STA settings overlay hidden.");
     if (config_.appMode == AppMode::RealRadar)
@@ -2424,6 +2587,9 @@ void RadarApp::enterSetupPortal(const char *reason)
     realApiUpdater_.stop();
     wifi_.stop();
     wifiManagerStarted_ = false;
+    bootConnectPendingAppStart_ = false;
+    bootWiFiConnectStartedMs_ = 0;
+    lastBootWiFiConnectAnimFrameMs_ = 0;
     setupDisplayMode_ = SetupDisplayMode::QrCode;
     settingsDisplayMode_ = SettingsDisplayMode::ApQr;
     staSettingsOverlayVisible_ = false;
@@ -2443,6 +2609,7 @@ void RadarApp::exitSetupPortal()
     DebugLog::println("Exiting setup portal.");
     const bool returnToApp = setupPortalFromLocalMenu_;
     setupPortalFromLocalMenu_ = false;
+    settingsEntryUntilMs_ = 0;
     configPortal_.stop();
     wifiLostSinceMs_ = 0;
 
@@ -2458,12 +2625,7 @@ void RadarApp::exitSetupPortal()
             }
             else
             {
-                setDeviceState(DeviceState::WiFiLost, "AP setup exited");
-                if (!renderer_.isReady())
-                {
-                    renderer_.begin();
-                }
-                renderRealRadarSystemStatus();
+                enterWiFiReconnectMode("AP setup exited");
             }
             return;
         }
@@ -2477,11 +2639,7 @@ void RadarApp::exitSetupPortal()
             }
             else
             {
-                if (!apiTestView_.isReady())
-                {
-                    apiTestView_.begin();
-                }
-                renderApiTestScreen();
+                enterWiFiReconnectMode("AP setup exited");
             }
             return;
         }
@@ -2495,7 +2653,6 @@ void RadarApp::exitSetupPortal()
 
 void RadarApp::updateSetupPortal(uint32_t now)
 {
-    (void)now;
     configPortal_.update();
 
     if (configPortal_.shouldRestart())
@@ -2504,6 +2661,8 @@ void RadarApp::updateSetupPortal(uint32_t now)
         delay(300);
         ESP.restart();
     }
+
+    updateSettingsEntryTimeout(now);
 }
 
 void RadarApp::renderSetupPortalFrame(const char *statusText)
@@ -2542,9 +2701,14 @@ void RadarApp::setDeviceState(DeviceState state, const char *reason)
     }
 }
 
+bool RadarApp::hasConfiguredWiFi() const
+{
+    return settings_.wifi.ssid[0] != '\0';
+}
+
 bool RadarApp::connectToConfiguredWiFi()
 {
-    if (!settings_.wifi.configured || settings_.wifi.ssid[0] == '\0')
+    if (!hasConfiguredWiFi())
     {
         DebugLog::println("WiFi is not configured in UserSettings.");
         return false;
@@ -2563,7 +2727,7 @@ bool RadarApp::connectToConfiguredWiFi()
     if (!wifi_.isConnected())
     {
         setDeviceState(DeviceState::WiFiLost);
-        DebugLog::printf("Configured WiFi connection failed. status=%s ssid_len=%u password_set=%u\r\n",
+        DebugLog::printf("[WiFi] Initial connect failed, entering reconnecting state. status=%s ssid_len=%u password_set=%u\r\n",
                          wifi_.statusText(),
                          static_cast<unsigned int>(strlen(settings_.wifi.ssid)),
                          settings_.wifi.password[0] != '\0' ? 1 : 0);
@@ -2576,6 +2740,22 @@ bool RadarApp::connectToConfiguredWiFi()
     return true;
 }
 
+void RadarApp::enterWiFiReconnectMode(const char *reason)
+{
+    stopRealRadarUpdater();
+    staSettingsOverlayVisible_ = false;
+    setDeviceState(DeviceState::WiFiLost, reason);
+    wifiLostSinceMs_ = millis();
+
+    if (!renderer_.isReady())
+    {
+        renderer_.begin();
+    }
+
+    DebugLog::println("[WiFi] Reconnect mode active. Long press BOOT to enter AP setup.");
+    renderRealRadarSystemStatus();
+}
+
 void RadarApp::startWifiManagerFromSettings()
 {
     if (wifiManagerStarted_)
@@ -2583,7 +2763,9 @@ void RadarApp::startWifiManagerFromSettings()
         return;
     }
 
-    wifi_.begin(settings_.wifi.ssid, settings_.wifi.password);
+    wifi_.begin(settings_.wifi.ssid,
+                settings_.wifi.password,
+                settings_.system.wifiTxPowerQuarterDbm);
     wifiManagerStarted_ = true;
 }
 
@@ -2694,7 +2876,10 @@ void RadarApp::renderRealRadarSystemStatus()
 
     if (!wifi_.isConnected())
     {
-        renderer_.renderSystemStatusFrame("WIFI LOST", "Reconnecting", "", settings_.display.uiTheme);
+        renderer_.renderSystemStatusFrame("WIFI UNAVAILABLE",
+                                          "Reconnecting...",
+                                          "Hold BOOT setup",
+                                          settings_.display.uiTheme);
         return;
     }
 
@@ -2831,17 +3016,30 @@ void RadarApp::updateApiTest(uint32_t now)
     {
         if (wifiLostSinceMs_ == 0)
         {
-            wifiLostSinceMs_ = now;
+            DebugLog::println("[WiFi] Lost connection, background reconnect only");
+            enterWiFiReconnectMode("WiFi lost");
         }
-        else if (now - wifiLostSinceMs_ > 30000)
+        else if (now - lastApiScreenMs_ >= 1000)
         {
-            enterSetupPortal("WiFi lost");
-            return;
+            lastApiScreenMs_ = now;
+            renderRealRadarSystemStatus();
         }
+        return;
     }
-    else
+
+    if (wifiLostSinceMs_ != 0 || deviceState_ == DeviceState::WiFiLost)
     {
         wifiLostSinceMs_ = 0;
+        if (bootConnectPendingAppStart_)
+        {
+            DebugLog::println("[WiFi] Background reconnect success, starting ApiTest.");
+            finishBootWiFiConnect(false);
+            return;
+        }
+
+        DebugLog::println("[WiFi] Background reconnect success, resuming ApiTest.");
+        beginStaSettingsServer();
+        setDeviceState(DeviceState::Running, "WiFi reconnected");
     }
 
     if (wifi_.isConnected() &&
@@ -2876,12 +3074,14 @@ void RadarApp::updateRealRadar(uint32_t now)
         {
             wifiLostSinceMs_ = now;
             stopRealRadarUpdater();
+            DebugLog::println("[WiFi] Lost connection, background reconnect only");
             setDeviceState(DeviceState::WiFiLost, "WiFi lost");
             renderRealRadarSystemStatus();
         }
-        else if (now - wifiLostSinceMs_ > 30000)
+        else if (now - lastFrameMs_ >= 1000)
         {
-            enterSetupPortal("WiFi lost");
+            lastFrameMs_ = now;
+            renderRealRadarSystemStatus();
         }
         return;
     }
@@ -2889,7 +3089,14 @@ void RadarApp::updateRealRadar(uint32_t now)
     if (wifiLostSinceMs_ != 0 || deviceState_ == DeviceState::WiFiLost)
     {
         wifiLostSinceMs_ = 0;
-        DebugLog::println("WiFi reconnected, restarting time sync and schedule check.");
+        if (bootConnectPendingAppStart_)
+        {
+            DebugLog::println("[WiFi] Background reconnect success, starting RealRadar.");
+            finishBootWiFiConnect(false);
+            return;
+        }
+
+        DebugLog::println("[WiFi] Background reconnect success, resuming normal display.");
         beginStaSettingsServer();
         timeManager_.begin(settings_);
         lastScheduleCheckMs_ = 0;

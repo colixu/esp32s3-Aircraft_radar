@@ -65,6 +65,24 @@ namespace
                mode == ScheduleIdleDisplayMode::DisplayOff;
     }
 
+    uint8_t sanitizeWifiTxPowerQuarterDbm(uint8_t power)
+    {
+        const uint8_t allowed[] = {34, 44, 52, 60, 68, 76, 78};
+        uint8_t best = 60;
+        uint8_t bestDelta = 255;
+        for (uint8_t i = 0; i < sizeof(allowed); ++i)
+        {
+            const uint8_t candidate = allowed[i];
+            const uint8_t delta = power > candidate ? power - candidate : candidate - power;
+            if (delta < bestDelta)
+            {
+                best = candidate;
+                bestDelta = delta;
+            }
+        }
+        return best;
+    }
+
     uint32_t defaultBudgetFor(ApiAccountMode mode, uint32_t customBudget)
     {
         switch (mode)
@@ -125,7 +143,7 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.location.centerLat = config.radarCenterLat;
     settings.location.centerLon = config.radarCenterLon;
     settings.location.maxRangeKm = config.maxRangeKm;
-    settings.location.fetchRangeKm = settings.location.maxRangeKm * 4.0f / 3.0f;
+    settings.location.fetchRangeKm = settings.location.maxRangeKm + 15.0f;
     settings.location.rangePresetsKm[0] = 30.0f;
     settings.location.rangePresetsKm[1] = 60.0f;
     settings.location.rangePresetsKm[2] = 120.0f;
@@ -172,6 +190,7 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
 
     settings.system.uiButtonPin = -1;
     settings.system.serialDebug = true;
+    settings.system.wifiTxPowerQuarterDbm = 60;
 
     sanitizeUserSettings(settings);
     updateQueryBoxFromCenterRange(settings);
@@ -232,6 +251,7 @@ void sanitizeUserSettings(UserSettings &settings)
     {
         settings.schedule.idleDisplayMode = ScheduleIdleDisplayMode::PausedStatus;
     }
+    settings.system.wifiTxPowerQuarterDbm = sanitizeWifiTxPowerQuarterDbm(settings.system.wifiTxPowerQuarterDbm);
 
     settings.display.maxAircraftToDisplay = clampValue<uint8_t>(settings.display.maxAircraftToDisplay,
                                                                 1,
@@ -489,9 +509,11 @@ void printUserSettings(const UserSettings &settings)
                      static_cast<unsigned long>(settings.prediction.correctionMinApiIntervalMs),
                      static_cast<unsigned long>(settings.prediction.correctionDurationMs),
                      settings.prediction.correctionStartDistanceKm);
-    DebugLog::printf("  uiButtonPin=%d serialDebug=%u\r\n",
+    DebugLog::printf("  uiButtonPin=%d serialDebug=%u wifiTxPower=%.1fdBm raw=%u\r\n",
                      settings.system.uiButtonPin,
-                     settings.system.serialDebug ? 1 : 0);
+                     settings.system.serialDebug ? 1 : 0,
+                     static_cast<float>(settings.system.wifiTxPowerQuarterDbm) / 4.0f,
+                     settings.system.wifiTxPowerQuarterDbm);
 }
 
 const char *uiThemeName(UiTheme theme)

@@ -44,6 +44,7 @@ private:
     bool bootLongFired_ = false;
     bool bootPendingClick_ = false;
     bool bootDoublePressArmed_ = false;
+    bool bootSuppressClickUntilRelease_ = false;
 
     void pushEvent(InputEvent event);
     void handleSerialInput(char command, Stream &serial);

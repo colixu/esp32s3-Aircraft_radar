@@ -125,6 +125,7 @@ bool SettingsStore::load(UserSettings &settings)
 
     settings.system.uiButtonPin = preferences_.getShort("btn", settings.system.uiButtonPin);
     settings.system.serialDebug = preferences_.getBool("dbg", settings.system.serialDebug);
+    settings.system.wifiTxPowerQuarterDbm = preferences_.getUChar("txpwr", settings.system.wifiTxPowerQuarterDbm);
 
     settings.wifi.configured = preferences_.getBool("wcfg", settings.wifi.configured);
     getString(preferences_, "ssid", settings.wifi.ssid, sizeof(settings.wifi.ssid));
@@ -207,6 +208,7 @@ bool SettingsStore::save(const UserSettings &settings)
 
     preferences_.putShort("btn", settings.system.uiButtonPin);
     preferences_.putBool("dbg", settings.system.serialDebug);
+    preferences_.putUChar("txpwr", settings.system.wifiTxPowerQuarterDbm);
 
     preferences_.putBool("wcfg", settings.wifi.configured);
     preferences_.putString("ssid", settings.wifi.ssid);

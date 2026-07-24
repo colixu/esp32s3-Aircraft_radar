@@ -9,6 +9,69 @@
 
 namespace
 {
+    float clampPortalValue(float value, float minValue, float maxValue)
+    {
+        if (value < minValue)
+        {
+            return minValue;
+        }
+        if (value > maxValue)
+        {
+            return maxValue;
+        }
+        return value;
+    }
+
+    float edgeExtensionLimitKm(float displayRangeKm)
+    {
+        const float displayRange = max(displayRangeKm, 1.0f);
+        return max(0.0f, min(displayRange * 0.5f, 300.0f - displayRange));
+    }
+
+    float edgeHintRangeFromExtension(float displayRangeKm, float extensionKm)
+    {
+        const float displayRange = max(displayRangeKm, 1.0f);
+        const float extension = clampPortalValue(extensionKm, 0.0f, edgeExtensionLimitKm(displayRange));
+        return clampPortalValue(displayRange + extension, displayRange, min(displayRange * 1.5f, 300.0f));
+    }
+
+    float edgeExtensionForRanges(float displayRangeKm, float fetchRangeKm)
+    {
+        const float displayRange = max(displayRangeKm, 1.0f);
+        const float fetchRange = edgeHintRangeFromExtension(displayRange, fetchRangeKm - displayRange);
+        return max(0.0f, fetchRange - displayRange);
+    }
+
+    void appendJsonEscaped(String &out, const String &value)
+    {
+        for (size_t i = 0; i < value.length(); ++i)
+        {
+            const char c = value[i];
+            if (c == '"' || c == '\\')
+            {
+                out += '\\';
+                out += c;
+            }
+            else if (c == '\n')
+            {
+                out += "\\n";
+            }
+            else if (c == '\r')
+            {
+                out += "\\r";
+            }
+            else
+            {
+                out += c;
+            }
+        }
+    }
+
+    const char *wifiAuthText(wifi_auth_mode_t authMode)
+    {
+        return authMode == WIFI_AUTH_OPEN ? "open" : "secured";
+    }
+
     const char *nvsStateText()
     {
 #if ENABLE_NVS_SETTINGS
@@ -47,9 +110,11 @@ bool ConfigPortal::beginApSetup(UserSettings *settings, SettingsStore *settingsS
     WiFi.disconnect(true, true);
     WiFi.mode(WIFI_OFF);
     delay(150);
-    WiFi.mode(WIFI_AP);
-    WiFi.setTxPower(WIFI_POWER_15dBm);
-    DebugLog::printf("ConfigPortal AP TX power set to 15 dBm (%d)\r\n", static_cast<int>(WiFi.getTxPower()));
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.setTxPower(static_cast<wifi_power_t>(settings_->system.wifiTxPowerQuarterDbm));
+    DebugLog::printf("ConfigPortal AP TX power set to %.1f dBm (%d)\r\n",
+                     static_cast<float>(settings_->system.wifiTxPowerQuarterDbm) / 4.0f,
+                     static_cast<int>(WiFi.getTxPower()));
     delay(50);
     const bool apStarted = WiFi.softAP(apSsid_, kApPassword);
     snprintf(ipAddress_, sizeof(ipAddress_), "%s", WiFi.softAPIP().toString().c_str());
@@ -117,6 +182,10 @@ void ConfigPortal::beginServer()
     server_.on("/status", HTTP_GET, [this]()
     {
         handleStatus();
+    });
+    server_.on("/wifiScan", HTTP_GET, [this]()
+    {
+        handleWifiScan();
     });
     server_.on("/restart", HTTP_GET, [this]()
     {
@@ -204,7 +273,7 @@ const char *ConfigPortal::staIpAddress() const
 void ConfigPortal::handleRoot()
 {
     updateLanguageFromRequest();
-    renderSimplePage();
+    renderProductSimplePage();
 }
 
 void ConfigPortal::handleAdvanced()
@@ -262,7 +331,7 @@ void ConfigPortal::handleStatus()
         return;
     }
 
-    char body[1024];
+    char body[1536];
     snprintf(body,
              sizeof(body),
              "{\"portalMode\":\"%s\",\"apSsid\":\"%s\",\"apIp\":\"%s\",\"staIp\":\"%s\","
@@ -270,9 +339,11 @@ void ConfigPortal::handleStatus()
              "\"apiProvider\":\"%s\",\"apiMode\":\"%s\",\"centerLat\":%.6f,\"centerLon\":%.6f,"
              "\"maxRangeKm\":%.1f,\"displayRangeKm\":%.1f,\"fetchRangeKm\":%.1f,"
              "\"effectiveFetchRangeKm\":%.1f,\"showEdgeDots\":%s,\"edgeDotsSupportedByTheme\":%s,"
+             "\"edgeExtensionKm\":%.1f,\"maxAircraft\":%u,\"showLabels\":%s,"
+             "\"showGroundTraffic\":%s,\"minAirborneAltitude\":%.1f,\"minAirborneSpeed\":%.1f,"
              "\"scheduleEnabled\":%s,\"computedRequestIntervalMs\":%lu,"
              "\"activeRequestIntervalMs\":%lu,\"idleDisplayMode\":\"%s\","
-             "\"nvsEnabled\":%s}",
+             "\"wifiTxPowerDbm\":%.1f,\"wifiTxPowerRaw\":%u,\"nvsEnabled\":%s}",
              mode_ == ConfigPortalMode::ApSetup ? "ap_setup" : "sta_settings",
              apSsid_,
              ipAddress_,
@@ -290,11 +361,69 @@ void ConfigPortal::handleStatus()
              effectiveFetchRangeKm(*settings_),
              settings_->display.showEdgeDots ? "true" : "false",
              uiThemeSupportsEdgeDots(settings_->display.uiTheme) ? "true" : "false",
+             edgeExtensionForRanges(settings_->location.maxRangeKm, settings_->location.fetchRangeKm),
+             settings_->display.maxAircraftToDisplay,
+             settings_->display.showLabels ? "true" : "false",
+             settings_->filter.showGroundTraffic ? "true" : "false",
+             settings_->filter.minAirborneAltitudeM,
+             settings_->filter.minAirborneSpeedMs,
              settings_->schedule.enabled ? "true" : "false",
              static_cast<unsigned long>(settings_->api.computedRequestIntervalMs),
              static_cast<unsigned long>(activeRequestIntervalMs(*settings_)),
              scheduleIdleDisplayModeName(settings_->schedule.idleDisplayMode),
+             static_cast<float>(settings_->system.wifiTxPowerQuarterDbm) / 4.0f,
+             settings_->system.wifiTxPowerQuarterDbm,
              nvsJsonText());
+    server_.send(200, "application/json", body);
+}
+
+void ConfigPortal::handleWifiScan()
+{
+    DebugLog::println("ConfigPortal WiFi scan requested.");
+    const int16_t networkCount = WiFi.scanNetworks(false, true);
+    if (networkCount < 0)
+    {
+        DebugLog::printf("ConfigPortal WiFi scan failed: %d\r\n", networkCount);
+        server_.send(200, "application/json", "{\"ok\":false,\"count\":0,\"networks\":[]}");
+        return;
+    }
+
+    String body;
+    body.reserve(1600);
+    body += "{\"ok\":true,\"count\":";
+    body += networkCount;
+    body += ",\"networks\":[";
+
+    uint8_t emitted = 0;
+    constexpr uint8_t kMaxNetworksToReturn = 24;
+    for (int16_t i = 0; i < networkCount && emitted < kMaxNetworksToReturn; ++i)
+    {
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0)
+        {
+            continue;
+        }
+
+        if (emitted > 0)
+        {
+            body += ',';
+        }
+
+        body += "{\"ssid\":\"";
+        appendJsonEscaped(body, ssid);
+        body += "\",\"rssi\":";
+        body += WiFi.RSSI(i);
+        body += ",\"auth\":\"";
+        body += wifiAuthText(WiFi.encryptionType(i));
+        body += "\"}";
+        ++emitted;
+    }
+    body += "]}";
+
+    WiFi.scanDelete();
+    DebugLog::printf("ConfigPortal WiFi scan complete: raw=%d shown=%u\r\n",
+                     networkCount,
+                     emitted);
     server_.send(200, "application/json", body);
 }
 
@@ -347,6 +476,220 @@ void ConfigPortal::sendStatusPanel(uint32_t intervalMs)
     snprintf(value, sizeof(value), "%.1fs", static_cast<float>(intervalMs) / 1000.0f);
     write(value);
     write("</p></fieldset>");
+}
+
+void ConfigPortal::renderProductSimplePage()
+{
+    if (settings_ == nullptr)
+    {
+        server_.send(500, "text/plain", "settings not available");
+        return;
+    }
+
+    char value[48];
+    const UserSettings &settings = *settings_;
+    uint8_t selectedRangePreset = 0;
+    float selectedRangeDelta = fabsf(settings.location.maxRangeKm - settings.location.rangePresetsKm[0]);
+    for (uint8_t i = 1; i < 3; ++i)
+    {
+        const float delta = fabsf(settings.location.maxRangeKm - settings.location.rangePresetsKm[i]);
+        if (delta < selectedRangeDelta)
+        {
+            selectedRangePreset = i;
+            selectedRangeDelta = delta;
+        }
+    }
+
+    const float edgeExtensionKm = edgeExtensionForRanges(settings.location.maxRangeKm, settings.location.fetchRangeKm);
+
+    sendPageHeader(text("Aircraft Radar Settings", "飞行雷达设置"));
+    sendLanguageSwitch("/");
+    write("<h1>");
+    write(text("Aircraft Radar Settings", "飞行雷达设置"));
+    write("</h1><p class=\"hint\">");
+    if (mode_ == ConfigPortalMode::ApSetup && settings.wifi.ssid[0] == '\0')
+    {
+        write(text("First setup: fill in WiFi, location and display settings. Save, then restart the device.",
+                   "首次配置：请填写 WiFi、雷达位置和显示设置。保存后请重启设备，设备会尝试连接该 WiFi。"));
+    }
+    else
+    {
+        write(text("Change user settings here. WiFi and startup changes should be checked after restart.",
+                   "可在这里修改用户设置。WiFi 和启动相关配置建议保存后重启确认。"));
+    }
+    write("</p>");
+
+    write("<fieldset><legend>");
+    write(text("Device Status", "设备状态"));
+    write("</legend><p>WiFi：");
+    write(WiFi.status() == WL_CONNECTED ? text("Connected", "已连接") :
+                                           (settings.wifi.ssid[0] != '\0' ? text("Saved, not connected", "已保存，未连接") : text("Not configured", "未配置")));
+    write("</p><p>IP 地址：");
+    write(mode_ == ConfigPortalMode::StaSettings ? staIpAddress_ : ipAddress_);
+    write("</p><p>");
+    write(text("Device state", "设备状态"));
+    write("：");
+    write(mode_ == ConfigPortalMode::ApSetup ? text("Setup mode", "配置模式") : text("Settings mode", "局域网设置"));
+    write("</p><p>");
+    write(text("Data source", "数据源"));
+    write("：");
+    write(apiProviderName(settings.api.provider));
+    write("</p></fieldset>");
+
+    write("<form method=\"POST\" action=\"/saveSimple\">");
+    sendHiddenLanguage();
+
+    write("<fieldset><legend>WiFi 设置</legend>");
+    write("<p>填写设备要连接的 WiFi。保存后设备会重启并尝试连接该网络。如果连接失败，可以长按 BOOT 重新进入设置。</p>");
+    sendTextInput("WiFi 名称（SSID）", "wifi_ssid", settings.wifi.ssid, false);
+    write("<button type=\"button\" onclick=\"scanWifiNetworks()\">扫描附近 WiFi</button><p id=\"wifiScanStatus\" class=\"hint\"></p><div id=\"wifiNetworkList\" class=\"wifiList\"></div>");
+    write("<label>WiFi 发射功率<select name=\"wifiTxPowerQuarterDbm\">");
+    sendSelectOption("34", "8.5 dBm（低功率）", settings.system.wifiTxPowerQuarterDbm == 34);
+    sendSelectOption("44", "11 dBm", settings.system.wifiTxPowerQuarterDbm == 44);
+    sendSelectOption("52", "13 dBm", settings.system.wifiTxPowerQuarterDbm == 52);
+    sendSelectOption("60", "15 dBm（当前默认）", settings.system.wifiTxPowerQuarterDbm == 60);
+    sendSelectOption("68", "17 dBm", settings.system.wifiTxPowerQuarterDbm == 68);
+    sendSelectOption("76", "19 dBm", settings.system.wifiTxPowerQuarterDbm == 76);
+    sendSelectOption("78", "19.5 dBm（较强）", settings.system.wifiTxPowerQuarterDbm == 78);
+    write("</select></label><p class=\"hint\">功率越高，连接距离可能更好，但功耗和发热也可能增加；如果家庭 WiFi 断联，可以先测试 17 dBm 或 19 dBm。</p>");
+    write("<label>WiFi 密码<span class=\"passwordRow\"><input id=\"wifiPassword\" name=\"wifi_password\" type=\"password\" value=\"");
+    write(settings.wifi.password);
+    write("\" placeholder=\"");
+    write(settings.wifi.password[0] != '\0' ? "密码已隐藏，不填写则保持不变" : "WiFi 密码");
+    write("\"><button type=\"button\" onclick=\"toggleWifiPassword()\" id=\"wifiPasswordToggle\">显示</button></span></label>");
+    write("<label><input style=\"width:auto\" type=\"checkbox\" onchange=\"toggleWifiPassword(this.checked)\"> 显示密码</label>");
+    write("</fieldset>");
+
+    write("<fieldset><legend>雷达位置</legend>");
+    write("<p>设备会以这个位置作为中心点，显示附近飞机。推荐使用手机当前位置。</p>");
+    snprintf(value, sizeof(value), "%.6f", settings.location.centerLat);
+    sendNumberInput("纬度", "centerLat", value, "0.000001");
+    snprintf(value, sizeof(value), "%.6f", settings.location.centerLon);
+    sendNumberInput("经度", "centerLon", value, "0.000001");
+    write("<button type=\"button\" onclick=\"usePhoneLocation()\">使用手机当前位置</button><p id=\"geoStatus\" class=\"hint\"></p>");
+    write("</fieldset>");
+
+    write("<fieldset><legend>雷达范围与边缘点</legend>");
+    write("<p>显示范围决定雷达圆环内完整显示飞机的范围。边缘点用于提示显示范围外、但仍在获取范围内的飞机；边缘点只表示方向，不代表飞机在屏幕边缘的真实位置。</p>");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[0]);
+    sendKmInput("范围档位 1", "rangePreset1Km", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[1]);
+    sendKmInput("范围档位 2", "rangePreset2Km", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.location.rangePresetsKm[2]);
+    sendKmInput("范围档位 3", "rangePreset3Km", value, "0.1");
+    write("<label>默认显示范围<select name=\"displayRangePreset\" onchange=\"updateEdgeHintLabels()\">");
+    snprintf(value, sizeof(value), "档位 1 - %.0f km", settings.location.rangePresetsKm[0]);
+    sendSelectOption("0", value, selectedRangePreset == 0);
+    snprintf(value, sizeof(value), "档位 2 - %.0f km", settings.location.rangePresetsKm[1]);
+    sendSelectOption("1", value, selectedRangePreset == 1);
+    snprintf(value, sizeof(value), "档位 3 - %.0f km", settings.location.rangePresetsKm[2]);
+    sendSelectOption("2", value, selectedRangePreset == 2);
+    write("</select></label>");
+    sendCheckbox("显示边缘点", "edgeDots", settings.display.showEdgeDots);
+    snprintf(value, sizeof(value), "%.1f", edgeExtensionKm);
+    sendKmInput("边缘扩展距离", "edgeExtensionKm", value, "0.1");
+    write("<p class=\"hint\" id=\"edgeHintText\"></p>");
+    write("</fieldset>");
+
+    write("<fieldset><legend>数据源</legend>");
+    write("<p>adsb.fi 可以直接使用，无需账号。如果你有 OpenSky 账号，也可以选择 OpenSky 并填写自己的 Client ID / Client Secret。</p>");
+    write("<label>数据源<select name=\"dataSource\" onchange=\"toggleDataSource(this.value)\">");
+    sendSelectOption("adsbfi", "adsb.fi Open Data", settings.api.provider == ApiProvider::AdsbFi);
+    sendSelectOption("opensky", "OpenSky", settings.api.provider == ApiProvider::OpenSky);
+    write("</select></label><p class=\"hint\" id=\"dataSourceHint\"></p>");
+    write("<div id=\"openSkyAccountFields\"><label>OpenSky 模式<select name=\"apiMode\" onchange=\"toggleClientFields(this.value)\">");
+    sendSelectOption("anonymous", "匿名 / 公共模式", settings.api.accountMode == ApiAccountMode::Anonymous);
+    sendSelectOption("client", "使用我的 OpenSky Client", settings.api.accountMode != ApiAccountMode::Anonymous);
+    write("</select></label><div id=\"clientFields\">");
+    sendTextInput("Client ID", "openSkyClientId", settings.api.openSkyClientId, false);
+    sendTextInput("Client Secret", "openSkyClientSecret", "", true);
+    write("<p class=\"hint\">Client Secret 不会在页面中回显；不填写则保持已保存的值。</p>");
+    write("</div></div></fieldset>");
+
+    write("<fieldset><legend>飞机显示与过滤</legend>");
+    write("<p>这些设置用于控制屏幕上显示多少飞机，以及过滤掉低空、低速或地面目标，避免画面过于拥挤。</p>");
+    write("<label>最大显示飞机数<select name=\"maxAircraftToDisplay\">");
+    snprintf(value, sizeof(value), "%u", settings.display.maxAircraftToDisplay);
+    sendSelectOption("8", "8", settings.display.maxAircraftToDisplay == 8);
+    sendSelectOption("12", "12", settings.display.maxAircraftToDisplay == 12);
+    sendSelectOption("16", "16", settings.display.maxAircraftToDisplay == 16);
+    sendSelectOption("24", "24", settings.display.maxAircraftToDisplay >= 24);
+    write("</select></label>");
+    sendCheckbox("显示飞机标签", "showLabels", settings.display.showLabels);
+    write("<p class=\"hint\">标签通常显示 callsign；选中飞机或特定 UI 可能显示高度、速度或距离。</p>");
+    sendCheckbox("显示地面目标", "showGroundTraffic", settings.filter.showGroundTraffic);
+    snprintf(value, sizeof(value), "%.1f", settings.filter.minAirborneAltitudeM);
+    sendNumberInput("最小空中高度 m", "minAirborneAltitudeM", value, "0.1");
+    snprintf(value, sizeof(value), "%.1f", settings.filter.minAirborneSpeedMs);
+    sendNumberInput("最小空中速度 m/s", "minAirborneSpeedMs", value, "0.1");
+    write("<p class=\"hint\">过滤规则：隐藏低于最小高度或低于最小速度的目标；通常用于减少机场地面、停机或慢速目标。</p>");
+    write("</fieldset>");
+
+    write("<fieldset><legend>运行时段</legend>");
+    write("<p>可以限制设备只在指定时间段内获取和显示飞机，减少无效请求，也适合夜间自动暂停。</p>");
+    write("<label>运行模式<select name=\"scheduleMode\" onchange=\"updateScheduleVisibility()\">");
+    sendSelectOption("always", "始终运行", !settings.schedule.enabled);
+    sendSelectOption("window", "仅在指定时段运行", settings.schedule.enabled);
+    write("</select></label><div id=\"scheduleFields\">");
+    snprintf(value, sizeof(value), "%d", settings.schedule.startMinutesOfDay / 60);
+    sendNumberInput("开始小时", "startHour", value, "1");
+    snprintf(value, sizeof(value), "%d", settings.schedule.startMinutesOfDay % 60);
+    sendNumberInput("开始分钟", "startMinute", value, "1");
+    snprintf(value, sizeof(value), "%d", settings.schedule.endMinutesOfDay / 60);
+    sendNumberInput("结束小时", "endHour", value, "1");
+    snprintf(value, sizeof(value), "%d", settings.schedule.endMinutesOfDay % 60);
+    sendNumberInput("结束分钟", "endMinute", value, "1");
+    write("</div><label>时区<select name=\"timezoneOffsetMinutes\" id=\"timezoneOffsetMinutes\">");
+    sendSelectOption("0", "UTC+0", settings.schedule.timezoneOffsetMinutes == 0);
+    sendSelectOption("480", "UTC+8", settings.schedule.timezoneOffsetMinutes == 480);
+    sendSelectOption("540", "UTC+9", settings.schedule.timezoneOffsetMinutes == 540);
+    snprintf(value, sizeof(value), "%d", settings.schedule.timezoneOffsetMinutes);
+    sendSelectOption(value, "当前保存值", settings.schedule.timezoneOffsetMinutes != 0 &&
+                                      settings.schedule.timezoneOffsetMinutes != 480 &&
+                                      settings.schedule.timezoneOffsetMinutes != 540);
+    write("</select></label><button type=\"button\" onclick=\"setBrowserTimezone()\">使用浏览器时区</button>");
+    write("<label>非运行时段显示<select name=\"idleDisplayMode\">");
+    sendSelectOption("0", "暂停状态", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::PausedStatus);
+    sendSelectOption("1", "时钟", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::Clock);
+    sendSelectOption("2", "黑屏", settings.schedule.idleDisplayMode == ScheduleIdleDisplayMode::DisplayOff);
+    write("</select></label></fieldset>");
+
+    write("<fieldset><legend>显示风格</legend>");
+    write("<label>默认界面风格<select name=\"uiTheme\">");
+    sendSelectOption("0", "经典雷达", settings.display.uiTheme == UiTheme::ClassicRadar);
+    sendSelectOption("1", "现代雷达", settings.display.uiTheme == UiTheme::ModernRadar);
+    sendSelectOption("2", "赛博朋克", settings.display.uiTheme == UiTheme::CyberpunkRadar);
+    sendSelectOption("3", "Plane Radar", settings.display.uiTheme == UiTheme::PlaneRadar);
+    write("</select></label></fieldset>");
+
+    write("<fieldset><legend>操作</legend>");
+    write("<p>保存设置后，部分 WiFi 或启动相关配置需要重启后完整生效。</p>");
+    write("<button type=\"submit\">保存设置</button>");
+    write("<a href=\"/restart?lang=");
+    write(languageCode());
+    write("\">重启设备</a>");
+    write("</fieldset></form>");
+    write("<!-- Developer page: open /advanced manually. -->");
+
+    write("<script>");
+    write("function byName(n){return document.querySelector('[name='+n+']');}");
+    write("function num(n,f){var e=byName(n);var v=e?parseFloat(e.value):NaN;return isNaN(v)?f:v;}");
+    write("function toggleWifiPassword(force){var p=document.getElementById('wifiPassword');var b=document.getElementById('wifiPasswordToggle');if(!p){return;}var show=(typeof force==='boolean')?force:p.type=='password';p.type=show?'text':'password';if(b){b.innerText=show?'隐藏':'显示';}}");
+    write("function selectWifiSsid(s){var e=byName('wifi_ssid');if(e){e.value=s;}var st=document.getElementById('wifiScanStatus');if(st){st.innerText='已选择 WiFi：'+s;}}");
+    write("function scanWifiNetworks(){var st=document.getElementById('wifiScanStatus');var list=document.getElementById('wifiNetworkList');if(st){st.innerText='正在扫描附近 WiFi...';}if(list){list.innerHTML='';}fetch('/wifiScan').then(function(r){return r.json();}).then(function(d){if(!list){return;}list.innerHTML='';if(!d.ok){if(st){st.innerText='扫描失败，请稍后重试。';}return;}if(!d.networks||d.networks.length==0){if(st){st.innerText='没有扫描到可显示的 WiFi。';}return;}if(st){st.innerText='扫描到 '+d.networks.length+' 个 WiFi，点击名称即可填入。';}d.networks.forEach(function(n){var b=document.createElement('button');b.type='button';b.className='wifiItem';var name=document.createElement('span');name.innerText=n.ssid;var info=document.createElement('small');info.innerText=n.rssi+' dBm '+(n.auth=='open'?'开放':'加密');b.appendChild(name);b.appendChild(info);b.onclick=function(){selectWifiSsid(n.ssid);};list.appendChild(b);});}).catch(function(){if(st){st.innerText='扫描失败，请检查设备是否仍在配置页面。';}});}");
+    write("function currentDisplayRange(){var p=byName('displayRangePreset');var idx=p?parseInt(p.value):0;return num('rangePreset'+(idx+1)+'Km',60);}");
+    write("function edgeExtensionLimit(r){return Math.max(0,Math.min(r*0.5,300-r));}");
+    write("function edgeTotalRange(r,e){var ext=Math.max(0,Math.min(e,edgeExtensionLimit(r)));return Math.max(r,Math.min(r+ext,Math.min(r*1.5,300)));}");
+    write("function updateEdgeHintLabels(){var r=currentDisplayRange();var e=byName('edgeExtensionKm');if(!e){return;}var ext=parseFloat(e.value);if(isNaN(ext)){ext=0;}var limit=edgeExtensionLimit(r);if(ext>limit){ext=limit;e.value=ext.toFixed(1);}if(ext<0){ext=0;e.value='0.0';}var total=edgeTotalRange(r,ext);var on=!!byName('edgeDots')&&byName('edgeDots').checked;e.disabled=false;var h=document.getElementById('edgeHintText');if(h){h.innerText=on?'当前显示范围 '+r.toFixed(0)+' km，向外扩展 '+ext.toFixed(1)+' km，边缘提示总范围 '+total.toFixed(0)+' km。超过显示范围、但仍在总范围内的飞机会显示为边缘点。':'已关闭边缘点，实际获取范围会回到当前显示范围 '+r.toFixed(0)+' km；扩展距离会保留到下次开启。';}}");
+    write("function updateScheduleVisibility(){var m=byName('scheduleMode');var f=document.getElementById('scheduleFields');if(f&&m){f.style.display=(m.value=='window')?'block':'none';}}");
+    write("function toggleClientFields(v){var c=document.getElementById('clientFields');if(c){c.style.display=(v=='client')?'block':'none';}}");
+    write("function toggleDataSource(v){var open=v=='opensky';var f=document.getElementById('openSkyAccountFields');var h=document.getElementById('dataSourceHint');if(f){f.style.display=open?'block':'none';}if(h){h.innerText=open?'OpenSky 可以匿名使用，也可以填写自己的 Client ID / Client Secret。':'adsb.fi Open Data 无需账号即可使用。';}}");
+    write("function setBrowserTimezone(){var o=-new Date().getTimezoneOffset();var e=document.getElementById('timezoneOffsetMinutes');var found=false;for(var i=0;i<e.options.length;i++){if(e.options[i].value==String(o)){e.selectedIndex=i;found=true;}}if(!found){var opt=document.createElement('option');opt.value=String(o);opt.text='UTC'+(o>=0?'+':'')+(o/60);opt.selected=true;e.add(opt);}}");
+    write("function usePhoneLocation(){var s=document.getElementById('geoStatus');if(!navigator.geolocation){s.innerText='当前浏览器不支持定位，请手动输入经纬度。';return;}if(!window.isSecureContext){s.innerText='浏览器通常会阻止 HTTP IP 页面获取定位，请手动输入经纬度。';return;}s.innerText='正在请求定位权限...';navigator.geolocation.getCurrentPosition(function(p){byName('centerLat').value=p.coords.latitude.toFixed(6);byName('centerLon').value=p.coords.longitude.toFixed(6);s.innerText='已填入当前位置，精度约 '+Math.round(p.coords.accuracy)+' m';},function(e){var m='定位失败';if(e.code==1){m='定位权限被拒绝';}else if(e.code==2){m='无法获取当前位置';}else if(e.code==3){m='定位超时';}s.innerText=m+'，请手动输入经纬度。';},{enableHighAccuracy:true,timeout:12000,maximumAge:30000});}");
+    write("['rangePreset1Km','rangePreset2Km','rangePreset3Km','displayRangePreset','edgeDots','edgeExtensionKm'].forEach(function(n){var e=byName(n);if(e){e.addEventListener('change',updateEdgeHintLabels);e.addEventListener('input',updateEdgeHintLabels);}});");
+    write("updateEdgeHintLabels();updateScheduleVisibility();toggleDataSource(byName('dataSource').value);toggleClientFields(byName('apiMode').value);scanWifiNetworks();");
+    write("</script>");
+    sendPageFooter();
 }
 
 void ConfigPortal::renderSimplePage()
@@ -775,6 +1118,25 @@ void ConfigPortal::renderAdvancedPage()
 void ConfigPortal::renderSavedPage(bool saved)
 {
     sendPageHeader(saved ? text("Saved", "已保存") : text("Save failed", "保存失败"));
+    write(saved ? "<h1>已保存</h1>" : "<h1>保存失败</h1>");
+    write("<p>");
+    if (saved)
+    {
+        write("设置已保存，设备将重新应用配置。如果修改了 WiFi，建议重启设备后确认连接状态。");
+    }
+    else
+    {
+        write("保存失败，请检查设备串口日志或稍后重试。");
+    }
+    write("</p><p><a href=\"/?lang=");
+    write(languageCode());
+    write("\">返回设置</a> <a href=\"/restart?lang=");
+    write(languageCode());
+    write("\">重启设备</a></p>");
+    sendPageFooter();
+    return;
+
+    sendPageHeader(saved ? text("Saved", "已保存") : text("Save failed", "保存失败"));
     write(saved ? text("<h1>Saved</h1>", "<h1>已保存</h1>") : text("<h1>Save failed</h1>", "<h1>保存失败</h1>"));
     write("<p>NVS: ");
     write(nvsStateText());
@@ -811,6 +1173,8 @@ void ConfigPortal::applySimpleFormToSettings()
     copyArgToBuffer("wifi_ssid", settings.wifi.ssid, sizeof(settings.wifi.ssid), false);
     copyArgToBuffer("wifi_password", settings.wifi.password, sizeof(settings.wifi.password), true);
     settings.wifi.configured = settings.wifi.ssid[0] != '\0';
+    settings.system.wifiTxPowerQuarterDbm = static_cast<uint8_t>(argToInt("wifiTxPowerQuarterDbm",
+                                                                          settings.system.wifiTxPowerQuarterDbm));
 
     settings.location.centerLat = argToFloat("centerLat", settings.location.centerLat);
     settings.location.centerLon = argToFloat("centerLon", settings.location.centerLon);
@@ -822,8 +1186,11 @@ void ConfigPortal::applySimpleFormToSettings()
     {
         settings.location.maxRangeKm = settings.location.rangePresetsKm[selectedRangePreset];
     }
-    settings.location.fetchRangeKm = argToFloat("fetchRangeKm", settings.location.fetchRangeKm);
     settings.display.showEdgeDots = hasCheckedArg("edgeDots");
+    const float previousEdgeExtensionKm = edgeExtensionForRanges(settings.location.maxRangeKm,
+                                                                 settings.location.fetchRangeKm);
+    const float edgeExtensionKm = argToFloat("edgeExtensionKm", previousEdgeExtensionKm);
+    settings.location.fetchRangeKm = edgeHintRangeFromExtension(settings.location.maxRangeKm, edgeExtensionKm);
 
     const String dataSource = server_.hasArg("dataSource") ? server_.arg("dataSource") : "adsbfi";
     settings.api.provider = dataSource == "opensky" ? ApiProvider::OpenSky : ApiProvider::AdsbFi;
@@ -871,7 +1238,11 @@ void ConfigPortal::applySimpleFormToSettings()
         argToInt("idleDisplayMode", static_cast<int>(settings.schedule.idleDisplayMode)));
 
     settings.display.uiTheme = static_cast<UiTheme>(argToInt("uiTheme", static_cast<int>(settings.display.uiTheme)));
-    settings.display.brightness = static_cast<uint8_t>(argToInt("brightness", settings.display.brightness));
+    settings.display.maxAircraftToDisplay = static_cast<uint8_t>(argToInt("maxAircraftToDisplay", settings.display.maxAircraftToDisplay));
+    settings.display.showLabels = hasCheckedArg("showLabels");
+    settings.filter.showGroundTraffic = hasCheckedArg("showGroundTraffic");
+    settings.filter.minAirborneAltitudeM = argToFloat("minAirborneAltitudeM", settings.filter.minAirborneAltitudeM);
+    settings.filter.minAirborneSpeedMs = argToFloat("minAirborneSpeedMs", settings.filter.minAirborneSpeedMs);
     sanitizeUserSettings(settings);
     updateQueryBoxFromCenterRange(settings);
 }
@@ -974,7 +1345,7 @@ void ConfigPortal::sendPageHeader(const char *title)
     write(":root{color-scheme:dark;--bg:#050b14;--panel:#0d1b2b;--panel2:#102438;--line:#244865;--text:#e8f6ff;--muted:#8fb3c8;--hint:#789aae;--accent:#28d8ff;--accent2:#35f0b4;--danger:#ff7a59}");
     write("*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;margin:0 auto;padding:14px 12px 26px;max-width:760px;background:radial-gradient(circle at 50% -16%,rgba(40,216,255,.18),transparent 360px),linear-gradient(180deg,#071426,#04080f);color:var(--text);font-size:15px;line-height:1.45}h1{font-size:24px;margin:8px 0 12px;letter-spacing:.02em}p{margin-top:0}form{display:grid;gap:12px}");
     write("fieldset{margin:0;padding:14px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,rgba(16,36,56,.94),rgba(9,20,32,.96));box-shadow:0 10px 28px rgba(0,0,0,.26);display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 14px}legend{font-weight:800;padding:0 6px;color:var(--accent)}label{display:block;color:var(--muted);font-size:13px;font-weight:650}input,select{width:100%;box-sizing:border-box;margin-top:5px;padding:10px;border:1px solid #2c5a78;border-radius:9px;background:#071522;color:var(--text);font-size:15px;outline:none}input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40,216,255,.14)}");
-    write("button{padding:10px 14px;border:0;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#031018;font-weight:800}button[type=button]{background:#17304a;color:var(--text);border:1px solid #2e5f7e}a{display:inline-block;margin:4px 8px 4px 0;color:var(--accent);text-decoration:none;font-weight:700}.hint,fieldset>p,fieldset>div{grid-column:1/-1}.hint{font-size:13px;color:var(--hint)}.unit,.passwordRow,.rangeLine{display:flex;align-items:center;gap:8px}.unit input,.passwordRow input,.rangeLine input{flex:1}.unit span,.rangeLine span{margin-top:5px;color:var(--muted);font-size:14px;font-weight:800}.passwordRow button{min-width:70px;margin-top:5px;padding:10px 12px}input[type=range]{padding:0;accent-color:var(--accent)}@media(max-width:560px){body{padding:10px 10px 24px}fieldset{grid-template-columns:1fr}}</style></head><body>");
+    write("button{padding:10px 14px;border:0;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#031018;font-weight:800}button[type=button]{background:#17304a;color:var(--text);border:1px solid #2e5f7e}a{display:inline-block;margin:4px 8px 4px 0;color:var(--accent);text-decoration:none;font-weight:700}.hint,fieldset>p,fieldset>div{grid-column:1/-1}.hint{font-size:13px;color:var(--hint)}.unit,.passwordRow,.rangeLine{display:flex;align-items:center;gap:8px}.unit input,.passwordRow input,.rangeLine input{flex:1}.unit span,.rangeLine span{margin-top:5px;color:var(--muted);font-size:14px;font-weight:800}.passwordRow button{min-width:70px;margin-top:5px;padding:10px 12px}input[type=range]{padding:0;accent-color:var(--accent)}.wifiList{display:grid;gap:7px}.wifiItem{width:100%;display:flex;justify-content:space-between;gap:10px;text-align:left;background:#0b2032!important;border-color:#2b6689!important;color:var(--text)!important}.wifiItem small{color:var(--muted);font-weight:700;white-space:nowrap}@media(max-width:560px){body{padding:10px 10px 24px}fieldset{grid-template-columns:1fr}}</style></head><body>");
 }
 
 void ConfigPortal::sendPageFooter()

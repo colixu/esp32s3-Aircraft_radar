@@ -116,12 +116,19 @@ private:
     uint32_t apiRequestCount_ = 0;
     uint32_t apiErrorCount_ = 0;
     uint32_t lastApiErrorMs_ = 0;
+    uint32_t settingsEntryUntilMs_ = 0;
+    uint32_t bootWiFiConnectStartedMs_ = 0;
+    uint32_t lastBootWiFiConnectAnimFrameMs_ = 0;
     uint32_t idleUiPreviewUntilMs_ = 0;
     uint32_t idleUiPreviewRefreshMs_ = 0;
     uint32_t idleUiPreviewApiIntervalMs_ = 0;
+    bool bootConnectPendingAppStart_ = false;
 
     void beginConfiguredMode();
     uint32_t computeIdleDelayMs() const;
+    void enterBootWiFiConnectState();
+    void updateConnectWiFi(uint32_t now);
+    void finishBootWiFiConnect(bool showEstablishedFrame);
     void beginRadarDemo();
     void beginApiTest();
     void beginRealRadar();
@@ -132,6 +139,8 @@ private:
     void wakeScreenFromSleep();
     void openSettingsEntryFromBootButton();
     void closeSettingsEntryFromBootButton();
+    void armSettingsEntryTimeout(uint32_t now);
+    void updateSettingsEntryTimeout(uint32_t now);
     void openLocalMenu();
     void closeLocalMenu(bool restoreDisplay = true);
     void updateLocalMenu(uint32_t now);
@@ -185,7 +194,9 @@ private:
     void updateSetupPortal(uint32_t now);
     void renderSetupPortalFrame(const char *statusText);
     void setDeviceState(DeviceState state, const char *reason = nullptr);
+    bool hasConfiguredWiFi() const;
     bool connectToConfiguredWiFi();
+    void enterWiFiReconnectMode(const char *reason);
     void startWifiManagerFromSettings();
     bool updateRealRadarRunGate(uint32_t now, bool forceCheck);
     void ensureRealRadarUpdaterRunning();

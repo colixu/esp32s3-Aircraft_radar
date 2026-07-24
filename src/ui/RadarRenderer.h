@@ -54,6 +54,9 @@ public:
                                  const char *line2,
                                  const char *line3,
                                  UiTheme theme);
+    void renderWiFiConnectingFrame(const char *ssid,
+                                   uint32_t elapsedMs,
+                                   uint8_t attempt);
     void renderClockFrame(const char *timeText,
                           const char *dateText,
                           const char *nextRunText,
@@ -179,6 +182,9 @@ private:
                              uint8_t selectedAircraftIndex,
                              const AppConfig &config);
     void drawStatusText(TFT_eSprite &canvas, const char *statusText);
+    void drawClassicNoAircraftStatus(TFT_eSprite &canvas,
+                                     const char *statusText,
+                                     uint8_t aircraftCount);
     void renderClassicRadarFrame(const Aircraft *aircraft,
                                  uint8_t aircraftCount,
                                  uint8_t selectedAircraftIndex,

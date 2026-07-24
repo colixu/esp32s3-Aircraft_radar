@@ -88,6 +88,7 @@ void InputManager::begin(const UserSettings &settings)
     bootLongFired_ = false;
     bootPendingClick_ = false;
     bootDoublePressArmed_ = false;
+    bootSuppressClickUntilRelease_ = false;
 
     if (buttonPin_ >= 0)
     {
@@ -586,6 +587,7 @@ void InputManager::updateBootButton()
         bootLongFired_ = false;
         bootPendingClick_ = false;
         bootDoublePressArmed_ = false;
+        bootSuppressClickUntilRelease_ = false;
         return;
     }
 
@@ -596,6 +598,7 @@ void InputManager::updateBootButton()
             bootLastRawPressed_ = false;
             bootStablePressed_ = false;
             bootRawChangedMs_ = now;
+            bootSuppressClickUntilRelease_ = false;
         }
         bootPressStartedMs_ = 0;
         bootLongFired_ = false;
@@ -641,7 +644,13 @@ void InputManager::updateBootButton()
         }
         else
         {
-            if (!bootLongFired_)
+            if (bootSuppressClickUntilRelease_)
+            {
+                bootSuppressClickUntilRelease_ = false;
+                bootPendingClick_ = false;
+                bootDoublePressArmed_ = false;
+            }
+            else if (!bootLongFired_)
             {
                 if (bootDoublePressArmed_)
                 {
@@ -667,6 +676,7 @@ void InputManager::updateBootButton()
         now - bootPressStartedMs_ >= kBootLongPressMs)
     {
         bootLongFired_ = true;
+        bootSuppressClickUntilRelease_ = true;
         bootPendingClick_ = false;
         bootDoublePressArmed_ = false;
         bootPostEventGuardUntilMs_ = now + kBootPostEventGuardMs;

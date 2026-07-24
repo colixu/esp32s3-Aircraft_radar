@@ -11,12 +11,13 @@ void WifiManagerSimple::begin()
     begin(WifiConfig::kSsid, WifiConfig::kPassword);
 }
 
-void WifiManagerSimple::begin(const char *ssid, const char *password)
+void WifiManagerSimple::begin(const char *ssid, const char *password, uint8_t txPowerQuarterDbm)
 {
     strncpy(ssid_, ssid != nullptr ? ssid : "", sizeof(ssid_) - 1);
     ssid_[sizeof(ssid_) - 1] = '\0';
     strncpy(password_, password != nullptr ? password : "", sizeof(password_) - 1);
     password_[sizeof(password_) - 1] = '\0';
+    txPowerQuarterDbm_ = txPowerQuarterDbm;
 
     DebugLog::println("Starting WiFi...");
     WiFi.persistent(false);
@@ -24,9 +25,11 @@ void WifiManagerSimple::begin(const char *ssid, const char *password)
     WiFi.mode(WIFI_OFF);
     delay(150);
     WiFi.mode(WIFI_STA);
-    WiFi.setTxPower(WIFI_POWER_15dBm);
+    WiFi.setTxPower(static_cast<wifi_power_t>(txPowerQuarterDbm_));
     WiFi.setSleep(false);
-    DebugLog::printf("WiFi TX power set to 15 dBm (%d)\r\n", static_cast<int>(WiFi.getTxPower()));
+    DebugLog::printf("WiFi TX power set to %.1f dBm (%d)\r\n",
+                     static_cast<float>(txPowerQuarterDbm_) / 4.0f,
+                     static_cast<int>(WiFi.getTxPower()));
     started_ = false;
     wasConnected_ = false;
     startConnect(millis());

@@ -457,7 +457,7 @@ void RadarRenderer::renderClassicRadarFrame(const Aircraft *aircraft,
     drawRadarBackground(frame_);
     drawScanSweep(frame_);
     drawAircraftTargets(frame_, aircraft, aircraftCount, selectedAircraftIndex, config);
-    drawStatusText(frame_, statusText);
+    drawClassicNoAircraftStatus(frame_, statusText, aircraftCount);
     frame_.pushSprite(0, 0);
 }
 
@@ -2785,6 +2785,112 @@ void RadarRenderer::renderSystemStatusFrame(const char *line1,
     frame_.pushSprite(0, 0);
 }
 
+void RadarRenderer::renderWiFiConnectingFrame(const char *ssid,
+                                              uint32_t elapsedMs,
+                                              uint8_t attempt)
+{
+    if (!frameBufferReady_)
+    {
+        return;
+    }
+
+    const uint16_t bg = tft_.color565(2, 5, 18);
+    const uint16_t grid = tft_.color565(12, 82, 92);
+    const uint16_t gridDim = tft_.color565(6, 32, 54);
+    const uint16_t cyan = tft_.color565(70, 220, 245);
+    const uint16_t green = tft_.color565(70, 255, 150);
+    const uint16_t magenta = tft_.color565(210, 70, 230);
+    const uint16_t text = tft_.color565(190, 235, 240);
+    const uint16_t textDim = tft_.color565(85, 165, 185);
+
+    frame_.fillSprite(bg);
+    frame_.drawCircle(kCenterX, kCenterY, 116, grid);
+    frame_.drawCircle(kCenterX, kCenterY, 88, gridDim);
+    frame_.drawCircle(kCenterX, kCenterY, 58, gridDim);
+    frame_.drawLine(kCenterX - 72, kCenterY, kCenterX + 72, kCenterY, gridDim);
+    frame_.drawLine(kCenterX, kCenterY - 72, kCenterX, kCenterY + 72, gridDim);
+
+    const float baseAngleDeg = fmodf(static_cast<float>(elapsedMs) * 0.16f, 360.0f);
+    for (uint8_t i = 0; i < 18; ++i)
+    {
+        const float angleDeg = baseAngleDeg - static_cast<float>(i) * 3.0f;
+        const float radians = angleDeg * DEG_TO_RAD;
+        const int16_t x0 = kCenterX + static_cast<int16_t>(cosf(radians) * 102.0f);
+        const int16_t y0 = kCenterY + static_cast<int16_t>(sinf(radians) * 102.0f);
+        const int16_t x1 = kCenterX + static_cast<int16_t>(cosf(radians) * 113.0f);
+        const int16_t y1 = kCenterY + static_cast<int16_t>(sinf(radians) * 113.0f);
+        const uint16_t color = i < 4 ? cyan : (i < 10 ? grid : gridDim);
+        frame_.drawLine(x0, y0, x1, y1, color);
+    }
+
+    for (uint8_t i = 0; i < 4; ++i)
+    {
+        const float angleDeg = baseAngleDeg + 90.0f * i + static_cast<float>(i) * 13.0f;
+        const float radians = angleDeg * DEG_TO_RAD;
+        const int16_t dotX = kCenterX + static_cast<int16_t>(cosf(radians) * 83.0f);
+        const int16_t dotY = kCenterY + static_cast<int16_t>(sinf(radians) * 83.0f);
+        frame_.fillCircle(dotX, dotY, i == 1 ? 3 : 2, i == 2 ? magenta : green);
+    }
+
+    const uint8_t wavePhase = static_cast<uint8_t>((elapsedMs / 220) % 3);
+    frame_.fillCircle(kCenterX, kCenterY + 2, 4, green);
+    for (uint8_t i = 0; i < 3; ++i)
+    {
+        const uint16_t waveColor = i == wavePhase ? cyan : grid;
+        const int16_t radius = 13 + i * 9;
+        for (int16_t deg = 218; deg <= 322; deg += 6)
+        {
+            const float r0 = static_cast<float>(radius);
+            const float r1 = static_cast<float>(radius + 3);
+            const float radians = static_cast<float>(deg) * DEG_TO_RAD;
+            const int16_t x0 = kCenterX + static_cast<int16_t>(cosf(radians) * r0);
+            const int16_t y0 = kCenterY + 12 + static_cast<int16_t>(sinf(radians) * r0);
+            const int16_t x1 = kCenterX + static_cast<int16_t>(cosf(radians) * r1);
+            const int16_t y1 = kCenterY + 12 + static_cast<int16_t>(sinf(radians) * r1);
+            frame_.drawLine(x0, y0, x1, y1, waveColor);
+        }
+    }
+
+    char ssidText[24];
+    const char *safeSsid = ssid != nullptr ? ssid : "";
+    if (strlen(safeSsid) > 15)
+    {
+        snprintf(ssidText, sizeof(ssidText), "SSID: %.15s...", safeSsid);
+    }
+    else
+    {
+        snprintf(ssidText, sizeof(ssidText), "SSID: %s", safeSsid);
+    }
+
+    char scanText[18];
+    const uint8_t dots = static_cast<uint8_t>((elapsedMs / 360) % 4);
+    snprintf(scanText,
+             sizeof(scanText),
+             "SCANNING%.*s",
+             dots,
+             "...");
+
+    char attemptText[18];
+    snprintf(attemptText, sizeof(attemptText), "ATTEMPT %u", attempt);
+
+    frame_.setTextDatum(MC_DATUM);
+    frame_.setTextColor(textDim, bg);
+    frame_.drawString("BOOT SEQUENCE", kCenterX, 34, 1);
+
+    frame_.setTextColor(text, bg);
+    frame_.drawString("LINKING WIFI", kCenterX, 72, 2);
+
+    frame_.setTextColor(textDim, bg);
+    frame_.drawString(ssidText, kCenterX, 158, 1);
+    frame_.drawString(scanText, kCenterX, 176, 1);
+    frame_.drawString(attemptText, kCenterX, 192, 1);
+
+    frame_.setTextColor(green, bg);
+    frame_.drawString("Hold BOOT to setup", kCenterX, 216, 1);
+
+    frame_.pushSprite(0, 0);
+}
+
 void RadarRenderer::renderClockFrame(const char *timeText,
                                      const char *dateText,
                                      const char *nextRunText,
@@ -3268,4 +3374,24 @@ void RadarRenderer::drawStatusText(TFT_eSprite &canvas, const char *statusText)
     {
         canvas.drawString(status, kCenterX, 226, 1);
     }
+}
+
+void RadarRenderer::drawClassicNoAircraftStatus(TFT_eSprite &canvas,
+                                                const char *statusText,
+                                                uint8_t aircraftCount)
+{
+    if (aircraftCount > 0)
+    {
+        return;
+    }
+
+    if (statusText == nullptr || strncmp(statusText, "NO AIRBORNE", 11) != 0)
+    {
+        canvas.setTextDatum(BC_DATUM);
+        canvas.setTextColor(labelGreen_, TFT_BLACK);
+        canvas.drawString("NO AIRBORNE", kCenterX, 226, 1);
+        return;
+    }
+
+    drawStatusText(canvas, statusText);
 }

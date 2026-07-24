@@ -137,6 +137,7 @@ struct SystemSettings
 {
     int16_t uiButtonPin;
     bool serialDebug;
+    uint8_t wifiTxPowerQuarterDbm;
 };
 
 struct UserSettings

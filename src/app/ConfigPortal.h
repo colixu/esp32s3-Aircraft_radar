@@ -61,10 +61,12 @@ private:
     void handleSaveSimple();
     void handleSaveAdvanced();
     void handleStatus();
+    void handleWifiScan();
     void handleRestart();
     void handleNotFound();
 
     void renderSimplePage();
+    void renderProductSimplePage();
     void renderAdvancedPage();
     void renderSavedPage(bool saved);
     void applySimpleFormToSettings();
