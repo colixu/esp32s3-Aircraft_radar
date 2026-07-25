@@ -51,6 +51,11 @@ namespace
         return *a == '\0' && *b == '\0';
     }
 
+    bool timeReached(uint32_t now, uint32_t deadline)
+    {
+        return static_cast<int32_t>(now - deadline) >= 0;
+    }
+
     void printVirtualButtonHelp()
     {
         DebugLog::println("Unknown button command. Use: btn up short|long|double or btn down short|long|double");
@@ -637,7 +642,7 @@ void InputManager::updateBootButton()
         return;
     }
 
-    if (bootPostEventGuardUntilMs_ != 0 && now < bootPostEventGuardUntilMs_)
+    if (bootPostEventGuardUntilMs_ != 0 && !timeReached(now, bootPostEventGuardUntilMs_))
     {
         if (!rawPressed)
         {
@@ -653,7 +658,7 @@ void InputManager::updateBootButton()
         return;
     }
 
-    if (bootPostEventGuardUntilMs_ != 0 && now >= bootPostEventGuardUntilMs_)
+    if (bootPostEventGuardUntilMs_ != 0 && timeReached(now, bootPostEventGuardUntilMs_))
     {
         bootPostEventGuardUntilMs_ = 0;
     }

@@ -8,6 +8,24 @@
 #include "OpenSkyAuthClient.h"
 #include "OpenSkyProvider.h"
 
+enum class ApiResultStatus : uint8_t
+{
+    NotRequested,
+    Success,
+    EmptyOk,
+    Error
+};
+
+enum class ApiErrorKind : uint8_t
+{
+    None,
+    NetworkError,
+    HttpError,
+    AuthError,
+    JsonError,
+    ResponseFormatError
+};
+
 struct OpenSkySnapshot
 {
     ApiAircraft aircraft[OpenSkyProvider::kMaxAircraft];
@@ -20,8 +38,16 @@ struct OpenSkySnapshot
     uint32_t completedMs = 0;
     uint32_t durationMs = 0;
     bool requestOk = false;
+    ApiResultStatus resultStatus = ApiResultStatus::NotRequested;
+    ApiErrorKind errorKind = ApiErrorKind::None;
     char lastError[64] = "not requested";
 };
+
+ApiResultStatus classifyApiResult(bool requestOk, int httpStatusCode, uint8_t aircraftCount);
+ApiErrorKind classifyApiErrorKind(bool requestOk, int httpStatusCode, const char *lastError);
+bool apiResultIsOk(ApiResultStatus status);
+const char *apiResultStatusName(ApiResultStatus status);
+const char *apiErrorKindName(ApiErrorKind kind);
 
 class OpenSkyAsyncUpdater
 {
@@ -35,6 +61,7 @@ public:
     int lastHttpStatus() const;
     uint32_t lastSuccessMs() const;
     const char *lastError() const;
+    uint32_t snapshotPublishFailureCount() const;
     bool tokenValid() const;
     uint32_t tokenExpiresInMs() const;
     const char *lastAuthError() const;
@@ -55,10 +82,12 @@ private:
     bool snapshotPending_ = false;
     int lastHttpStatus_ = 0;
     uint32_t lastSuccessMs_ = 0;
+    volatile uint32_t snapshotPublishFailureCount_ = 0;
     char lastError_[64] = "not requested";
 
     static void taskEntry(void *arg);
     void taskLoop();
+    bool copyRuntimeConfig(AppConfig &config, UserSettings &settings, uint32_t &requestIntervalMs);
     void publishSnapshot(const OpenSkyProvider &provider,
                          bool requestOk,
                          uint32_t completedMs,

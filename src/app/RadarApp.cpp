@@ -2638,6 +2638,22 @@ int16_t RadarApp::currentTemperatureCx10ForStats() const
     return lastTemperatureCx10_;
 }
 
+void RadarApp::recordApiResultForStats(ApiResultStatus resultStatus, int httpStatusCode, uint32_t now)
+{
+    if (apiResultIsOk(resultStatus))
+    {
+        longRunStats_.recordApiSuccess();
+        return;
+    }
+
+    ++apiErrorCount_;
+    lastApiErrorMs_ = now;
+    longRunStats_.recordApiError(currentUnixTimeForStats(),
+                                 now / 1000UL,
+                                 static_cast<int16_t>(httpStatusCode),
+                                 currentTemperatureCx10ForStats());
+}
+
 void RadarApp::printApiAuthStatus()
 {
     DebugLog::println("API/auth status:");
@@ -3155,7 +3171,11 @@ void RadarApp::updateApiTest(uint32_t now)
         (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= activeRequestIntervalMs(settings_)))
     {
         lastApiRequestMs_ = now;
-        openSky_.requestStates(config_);
+        ++apiRequestCount_;
+        const bool requestOk = openSky_.requestStates(config_);
+        const ApiResultStatus resultStatus =
+            classifyApiResult(requestOk, openSky_.httpStatusCode(), openSky_.aircraftCount());
+        recordApiResultForStats(resultStatus, openSky_.httpStatusCode(), now);
         printApiTestSerialStatus();
     }
 
@@ -3519,16 +3539,19 @@ void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t
 {
     ++apiRequestCount_;
     DebugLog::println("received new API snapshot");
-    DebugLog::printf("  HTTP=%d duration=%lu ms payload=%lu aircraft=%u status=%s\r\n",
+    DebugLog::printf("  HTTP=%d duration=%lu ms payload=%lu aircraft=%u result=%s error=%s status=%s\r\n",
                      snapshot.httpStatusCode,
                      static_cast<unsigned long>(snapshot.durationMs),
                      static_cast<unsigned long>(snapshot.payloadLength),
                      snapshot.aircraftCount,
+                     apiResultStatusName(snapshot.resultStatus),
+                     apiErrorKindName(snapshot.errorKind),
                      snapshot.lastError);
 
-    if (snapshot.requestOk || snapshot.httpStatusCode == 200)
+    recordApiResultForStats(snapshot.resultStatus, snapshot.httpStatusCode, now);
+
+    if (apiResultIsOk(snapshot.resultStatus))
     {
-        longRunStats_.recordApiSuccess();
         RealRadarTrackStats stats;
         realTrackManager_.mergeSnapshot(snapshot, settings_, now, stats);
         realTrackManager_.updatePrediction(settings_, now);
@@ -3537,12 +3560,6 @@ void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t
     }
     else
     {
-        ++apiErrorCount_;
-        lastApiErrorMs_ = now;
-        longRunStats_.recordApiError(currentUnixTimeForStats(),
-                                     now / 1000UL,
-                                     static_cast<int16_t>(snapshot.httpStatusCode),
-                                     currentTemperatureCx10ForStats());
         DebugLog::println("  API snapshot failed, keeping current tracks.");
     }
 

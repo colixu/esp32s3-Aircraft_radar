@@ -8,6 +8,22 @@
 
 namespace
 {
+    void printAlways(const char *message)
+    {
+        const bool wasEnabled = DebugLog::isEnabled();
+        DebugLog::setEnabled(true);
+        DebugLog::println(message);
+        DebugLog::setEnabled(wasEnabled);
+    }
+
+    void printfAlways(const char *format, unsigned int expected, unsigned int actual)
+    {
+        const bool wasEnabled = DebugLog::isEnabled();
+        DebugLog::setEnabled(true);
+        DebugLog::printf(format, expected, actual);
+        DebugLog::setEnabled(wasEnabled);
+    }
+
     const char *resetReasonText(uint8_t reason)
     {
         switch (static_cast<esp_reset_reason_t>(reason))
@@ -55,6 +71,7 @@ bool LongRunStats::begin()
     ready_ = preferences_.begin(kNamespace, false);
     if (!ready_)
     {
+        printAlways("NVS_WRITE_ERROR LongRunStats Preferences.begin failed");
         return false;
     }
 
@@ -141,7 +158,11 @@ void LongRunStats::recordWifiReconnected(uint32_t unixTime,
 void LongRunStats::recordApiSuccess()
 {
 #if ENABLE_LONG_RUN_STATS
-    data_.currentApiConsecutiveErrors = 0;
+    if (data_.currentApiConsecutiveErrors != 0)
+    {
+        data_.currentApiConsecutiveErrors = 0;
+        save();
+    }
 #endif
 }
 
@@ -312,6 +333,12 @@ void LongRunStats::save()
     }
 
     data_.version = kVersion;
-    preferences_.putBytes(kBlobKey, &data_, sizeof(data_));
+    const size_t written = preferences_.putBytes(kBlobKey, &data_, sizeof(data_));
+    if (written != sizeof(data_))
+    {
+        printfAlways("NVS_WRITE_ERROR LongRunStats putBytes expected=%u actual=%u\r\n",
+                     static_cast<unsigned int>(sizeof(data_)),
+                     static_cast<unsigned int>(written));
+    }
 #endif
 }

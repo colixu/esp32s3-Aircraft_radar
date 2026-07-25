@@ -5,28 +5,173 @@
 
 #include "../app/DebugLog.h"
 
+namespace
+{
+    bool timeReached(uint32_t now, uint32_t deadline)
+    {
+        return static_cast<int32_t>(now - deadline) >= 0;
+    }
+
+    bool startsWith(const char *text, const char *prefix)
+    {
+        if (text == nullptr || prefix == nullptr)
+        {
+            return false;
+        }
+
+        while (*prefix != '\0')
+        {
+            if (*text != *prefix)
+            {
+                return false;
+            }
+            ++text;
+            ++prefix;
+        }
+
+        return true;
+    }
+
+    void printAlways(const char *message)
+    {
+        const bool wasEnabled = DebugLog::isEnabled();
+        DebugLog::setEnabled(true);
+        DebugLog::println(message);
+        DebugLog::setEnabled(wasEnabled);
+    }
+
+    void printfAlways(const char *format, const char *result, int httpStatus)
+    {
+        const bool wasEnabled = DebugLog::isEnabled();
+        DebugLog::setEnabled(true);
+        DebugLog::printf(format, result, httpStatus);
+        DebugLog::setEnabled(wasEnabled);
+    }
+
+    void applyQueryBoxFromSettings(AppConfig &config, const UserSettings &settings)
+    {
+        config.openSkyLamin = settings.location.queryLatMin;
+        config.openSkyLomin = settings.location.queryLonMin;
+        config.openSkyLamax = settings.location.queryLatMax;
+        config.openSkyLomax = settings.location.queryLonMax;
+    }
+}
+
+ApiResultStatus classifyApiResult(bool requestOk, int httpStatusCode, uint8_t aircraftCount)
+{
+    if (!requestOk || httpStatusCode != 200)
+    {
+        return ApiResultStatus::Error;
+    }
+
+    return aircraftCount > 0 ? ApiResultStatus::Success : ApiResultStatus::EmptyOk;
+}
+
+ApiErrorKind classifyApiErrorKind(bool requestOk, int httpStatusCode, const char *lastError)
+{
+    if (requestOk && httpStatusCode == 200)
+    {
+        return ApiErrorKind::None;
+    }
+
+    if (lastError != nullptr)
+    {
+        if (startsWith(lastError, "AUTH"))
+        {
+            return ApiErrorKind::AuthError;
+        }
+        if (startsWith(lastError, "JSON"))
+        {
+            return ApiErrorKind::JsonError;
+        }
+        if (strcmp(lastError, "states missing") == 0 ||
+            strcmp(lastError, "no aircraft array") == 0)
+        {
+            return ApiErrorKind::ResponseFormatError;
+        }
+    }
+
+    if (httpStatusCode == 401 || httpStatusCode == 403)
+    {
+        return ApiErrorKind::AuthError;
+    }
+
+    if (httpStatusCode <= 0)
+    {
+        return ApiErrorKind::NetworkError;
+    }
+
+    return ApiErrorKind::HttpError;
+}
+
+bool apiResultIsOk(ApiResultStatus status)
+{
+    return status == ApiResultStatus::Success ||
+           status == ApiResultStatus::EmptyOk;
+}
+
+const char *apiResultStatusName(ApiResultStatus status)
+{
+    switch (status)
+    {
+        case ApiResultStatus::Success:
+            return "API_SUCCESS";
+        case ApiResultStatus::EmptyOk:
+            return "API_EMPTY_OK";
+        case ApiResultStatus::Error:
+            return "API_ERROR";
+        case ApiResultStatus::NotRequested:
+        default:
+            return "API_NOT_REQUESTED";
+    }
+}
+
+const char *apiErrorKindName(ApiErrorKind kind)
+{
+    switch (kind)
+    {
+        case ApiErrorKind::NetworkError:
+            return "API_NETWORK_ERROR";
+        case ApiErrorKind::HttpError:
+            return "API_HTTP_ERROR";
+        case ApiErrorKind::AuthError:
+            return "API_AUTH_ERROR";
+        case ApiErrorKind::JsonError:
+            return "API_JSON_ERROR";
+        case ApiErrorKind::ResponseFormatError:
+            return "API_RESPONSE_FORMAT_ERROR";
+        case ApiErrorKind::None:
+        default:
+            return "API_NO_ERROR";
+    }
+}
+
 bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &settings, uint32_t requestIntervalMs)
 {
     if (taskHandle_ != nullptr)
     {
-        config_ = config;
-        config_.openSkyLamin = settings.location.queryLatMin;
-        config_.openSkyLomin = settings.location.queryLonMin;
-        config_.openSkyLamax = settings.location.queryLatMax;
-        config_.openSkyLomax = settings.location.queryLonMax;
-        requestIntervalMs_ = requestIntervalMs;
-        settings_ = settings;
-        nextRequestMs_ = millis();
+        AppConfig updatedConfig = config;
+        applyQueryBoxFromSettings(updatedConfig, settings);
+        if (mutex_ != nullptr && xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            config_ = updatedConfig;
+            requestIntervalMs_ = requestIntervalMs;
+            settings_ = settings;
+            nextRequestMs_ = millis();
+            xSemaphoreGive(mutex_);
+        }
+        else
+        {
+            DebugLog::println("OpenSkyAsyncUpdater: settings update lock timeout.");
+            return false;
+        }
         DebugLog::printf("OpenSkyAsyncUpdater: settings updated, next request now, interval=%lu ms\r\n",
                          static_cast<unsigned long>(requestIntervalMs_));
         return !stopRequested_;
     }
 
     config_ = config;
-    config_.openSkyLamin = settings.location.queryLatMin;
-    config_.openSkyLomin = settings.location.queryLonMin;
-    config_.openSkyLamax = settings.location.queryLatMax;
-    config_.openSkyLomax = settings.location.queryLonMax;
+    applyQueryBoxFromSettings(config_, settings);
     settings_ = settings;
     requestIntervalMs_ = requestIntervalMs;
     nextRequestMs_ = 0;
@@ -117,6 +262,11 @@ const char *OpenSkyAsyncUpdater::lastError() const
     return lastError_;
 }
 
+uint32_t OpenSkyAsyncUpdater::snapshotPublishFailureCount() const
+{
+    return snapshotPublishFailureCount_;
+}
+
 bool OpenSkyAsyncUpdater::tokenValid() const
 {
     return authClient_.isAuthenticated();
@@ -157,14 +307,23 @@ void OpenSkyAsyncUpdater::taskLoop()
             continue;
         }
 
-        if (nextRequestMs_ != 0 && now < nextRequestMs_)
+        if (nextRequestMs_ != 0 && !timeReached(now, nextRequestMs_))
+        {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        AppConfig localConfig;
+        UserSettings localSettings;
+        uint32_t localRequestIntervalMs = requestIntervalMs_;
+        if (!copyRuntimeConfig(localConfig, localSettings, localRequestIntervalMs))
         {
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
 
         updating_ = true;
-        const bool useAdsbFi = settings_.api.provider == ApiProvider::AdsbFi;
+        const bool useAdsbFi = localSettings.api.provider == ApiProvider::AdsbFi;
         const char *providerName = useAdsbFi ? "adsb.fi" : "OpenSky";
         DebugLog::printf("[%s] API request start\r\n", providerName);
         const uint32_t startMs = millis();
@@ -175,7 +334,7 @@ void OpenSkyAsyncUpdater::taskLoop()
         bool primaryRateLimited = false;
         if (useAdsbFi)
         {
-            requestOk = adsbFiProvider.requestAircraft(settings_);
+            requestOk = adsbFiProvider.requestAircraft(localSettings);
             httpStatus = adsbFiProvider.httpStatusCode();
             aircraftCount = adsbFiProvider.aircraftCount();
             primaryRateLimited = httpStatus == 429;
@@ -184,7 +343,7 @@ void OpenSkyAsyncUpdater::taskLoop()
                 DebugLog::printf("[adsb.fi] request failed: HTTP %d %s, trying OpenSky fallback\r\n",
                                  httpStatus,
                                  adsbFiProvider.lastError());
-                const bool fallbackOk = openSkyProvider.requestStates(config_, settings_, &authClient_);
+                const bool fallbackOk = openSkyProvider.requestStates(localConfig, localSettings, &authClient_);
                 DebugLog::printf("[OpenSky fallback] HTTP %d aircraft=%u status=%s\r\n",
                                  openSkyProvider.httpStatusCode(),
                                  openSkyProvider.aircraftCount(),
@@ -198,7 +357,7 @@ void OpenSkyAsyncUpdater::taskLoop()
         }
         else
         {
-            requestOk = openSkyProvider.requestStates(config_, settings_, &authClient_);
+            requestOk = openSkyProvider.requestStates(localConfig, localSettings, &authClient_);
             httpStatus = openSkyProvider.httpStatusCode();
             aircraftCount = openSkyProvider.aircraftCount();
         }
@@ -208,7 +367,7 @@ void OpenSkyAsyncUpdater::taskLoop()
                          providerName,
                          httpStatus,
                          aircraftCount,
-                         static_cast<unsigned long>(requestIntervalMs_ / 1000UL),
+                         static_cast<unsigned long>(localRequestIntervalMs / 1000UL),
                          static_cast<unsigned long>(durationMs));
 
         if (publishAdsbFi)
@@ -221,10 +380,10 @@ void OpenSkyAsyncUpdater::taskLoop()
         }
         updating_ = false;
 
-        uint32_t waitMs = requestIntervalMs_;
+        uint32_t waitMs = localRequestIntervalMs;
         if (httpStatus == 429 || primaryRateLimited)
         {
-            waitMs = max<uint32_t>(requestIntervalMs_ * 2, primaryRateLimited ? 60000 : 120000);
+            waitMs = max<uint32_t>(localRequestIntervalMs * 2, primaryRateLimited ? 60000 : 120000);
             DebugLog::printf("[%s] HTTP 429 rate limited, backoff=%lus\r\n",
                              primaryRateLimited ? "adsb.fi" : providerName,
                              static_cast<unsigned long>(waitMs / 1000UL));
@@ -235,6 +394,27 @@ void OpenSkyAsyncUpdater::taskLoop()
     running_ = false;
     taskHandle_ = nullptr;
     vTaskDelete(nullptr);
+}
+
+bool OpenSkyAsyncUpdater::copyRuntimeConfig(AppConfig &config, UserSettings &settings, uint32_t &requestIntervalMs)
+{
+    if (mutex_ == nullptr)
+    {
+        DebugLog::println("OpenSkyAsyncUpdater: runtime config mutex missing.");
+        return false;
+    }
+
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) != pdTRUE)
+    {
+        DebugLog::println("OpenSkyAsyncUpdater: runtime config lock timeout.");
+        return false;
+    }
+
+    config = config_;
+    settings = settings_;
+    requestIntervalMs = requestIntervalMs_;
+    xSemaphoreGive(mutex_);
+    return true;
 }
 
 void OpenSkyAsyncUpdater::publishSnapshot(const OpenSkyProvider &provider,
@@ -295,6 +475,8 @@ void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
     next.completedMs = completedMs;
     next.durationMs = durationMs;
     next.requestOk = requestOk;
+    next.resultStatus = classifyApiResult(requestOk, httpStatusCode, aircraftCount);
+    next.errorKind = classifyApiErrorKind(requestOk, httpStatusCode, lastError);
     strncpy(next.lastError, lastError != nullptr ? lastError : "unknown", sizeof(next.lastError) - 1);
     next.lastError[sizeof(next.lastError) - 1] = '\0';
 
@@ -303,14 +485,35 @@ void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
         next.aircraft[i] = aircraft[i];
     }
 
-    if (mutex_ != nullptr && xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) == pdTRUE)
+    if (mutex_ == nullptr)
     {
-        snapshot_ = next;
-        snapshotPending_ = true;
-        lastHttpStatus_ = next.httpStatusCode;
-        lastSuccessMs_ = next.lastSuccessMs;
-        strncpy(lastError_, next.lastError, sizeof(lastError_) - 1);
-        lastError_[sizeof(lastError_) - 1] = '\0';
-        xSemaphoreGive(mutex_);
+        ++snapshotPublishFailureCount_;
+        printAlways("SNAPSHOT_PUBLISH_ERROR mutex missing");
+        return;
     }
+
+    while (!stopRequested_)
+    {
+        if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(250)) == pdTRUE)
+        {
+            if (!snapshotPending_)
+            {
+                snapshot_ = next;
+                snapshotPending_ = true;
+                lastHttpStatus_ = next.httpStatusCode;
+                lastSuccessMs_ = next.lastSuccessMs;
+                strncpy(lastError_, next.lastError, sizeof(lastError_) - 1);
+                lastError_[sizeof(lastError_) - 1] = '\0';
+                xSemaphoreGive(mutex_);
+                return;
+            }
+            xSemaphoreGive(mutex_);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    ++snapshotPublishFailureCount_;
+    printfAlways("SNAPSHOT_PUBLISH_ERROR stopped before publish result=%s http=%d\r\n",
+                 apiResultStatusName(next.resultStatus),
+                 next.httpStatusCode);
 }

@@ -191,7 +191,7 @@ bool AdsbFiProvider::parsePayload(const String &payload, const UserSettings &set
         validPositionCount_ = 0;
         setError("no aircraft array");
         DebugLog::println(lastError_);
-        return true;
+        return false;
     }
 
     rawStateCount_ = aircraftArray.size();

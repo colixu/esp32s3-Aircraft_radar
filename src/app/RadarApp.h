@@ -199,6 +199,7 @@ private:
     void clearLongRunStats();
     uint32_t currentUnixTimeForStats() const;
     int16_t currentTemperatureCx10ForStats() const;
+    void recordApiResultForStats(ApiResultStatus resultStatus, int httpStatusCode, uint32_t now);
     void printApiAuthStatus();
     void clearAuthToken();
     void enterSetupPortal(const char *reason);

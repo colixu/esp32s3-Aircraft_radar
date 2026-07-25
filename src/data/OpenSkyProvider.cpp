@@ -91,7 +91,14 @@ bool OpenSkyProvider::requestStates(const AppConfig &config, const UserSettings 
     }
 
     lastSuccessMs_ = millis();
-    setError("OK");
+    if (aircraftCount_ == 0)
+    {
+        setError("no aircraft");
+    }
+    else
+    {
+        setError("OK");
+    }
     DebugLog::printf("Parsed aircraft: %u\r\n", aircraftCount_);
     printSummary();
     return true;
@@ -261,7 +268,7 @@ bool OpenSkyProvider::parsePayload(const String &payload)
     {
         setError("no aircraft");
         DebugLog::println(lastError_);
-        return false;
+        return true;
     }
 
     return true;

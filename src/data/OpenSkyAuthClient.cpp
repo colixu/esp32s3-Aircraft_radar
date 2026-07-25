@@ -13,6 +13,11 @@ namespace
         "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token";
     constexpr uint32_t kRefreshMarginSeconds = 30;
     constexpr uint32_t kDefaultExpiresInSeconds = 1800;
+
+    bool timeReached(uint32_t now, uint32_t deadline)
+    {
+        return static_cast<int32_t>(now - deadline) >= 0;
+    }
 }
 
 bool OpenSkyAuthClient::begin()
@@ -77,7 +82,7 @@ bool OpenSkyAuthClient::isAuthenticated() const
 uint32_t OpenSkyAuthClient::tokenExpiresInMs() const
 {
     const uint32_t now = millis();
-    if (!tokenIsValid() || tokenExpireMs_ <= now)
+    if (!tokenIsValid() || timeReached(now, tokenExpireMs_))
     {
         return 0;
     }
@@ -159,7 +164,9 @@ bool OpenSkyAuthClient::requestToken(const UserSettings &settings)
 
 bool OpenSkyAuthClient::tokenIsValid() const
 {
-    return accessToken_[0] != '\0' && tokenExpireMs_ != 0 && millis() < tokenExpireMs_;
+    return accessToken_[0] != '\0' &&
+           tokenExpireMs_ != 0 &&
+           !timeReached(millis(), tokenExpireMs_);
 }
 
 String OpenSkyAuthClient::urlEncode(const char *value) const
