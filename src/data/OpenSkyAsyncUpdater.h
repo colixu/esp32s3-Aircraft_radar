@@ -40,7 +40,29 @@ struct OpenSkySnapshot
     bool requestOk = false;
     ApiResultStatus resultStatus = ApiResultStatus::NotRequested;
     ApiErrorKind errorKind = ApiErrorKind::None;
+    bool fallbackAttempted = false;
+    bool fallbackSucceeded = false;
+    int primaryHttpStatusCode = 0;
+    ApiErrorKind primaryErrorKind = ApiErrorKind::None;
     char lastError[64] = "not requested";
+    char primaryError[64] = "";
+};
+
+struct OpenSkyAsyncStatus
+{
+    bool running = false;
+    bool updating = false;
+    int lastHttpStatus = 0;
+    uint32_t lastSuccessMs = 0;
+    uint32_t snapshotPublishFailureCount = 0;
+    uint32_t primaryProviderErrorCount = 0;
+    uint32_t fallbackAttemptCount = 0;
+    uint32_t fallbackSuccessCount = 0;
+    uint32_t fallbackFailureCount = 0;
+    bool tokenValid = false;
+    uint32_t tokenExpiresInMs = 0;
+    char lastError[64] = "not requested";
+    char lastAuthError[80] = "not requested";
 };
 
 ApiResultStatus classifyApiResult(bool requestOk, int httpStatusCode, uint8_t aircraftCount);
@@ -66,6 +88,7 @@ public:
     uint32_t tokenExpiresInMs() const;
     const char *lastAuthError() const;
     void invalidateAuthToken();
+    bool copyStatus(OpenSkyAsyncStatus &status) const;
 
 private:
     AppConfig config_;
@@ -83,10 +106,23 @@ private:
     int lastHttpStatus_ = 0;
     uint32_t lastSuccessMs_ = 0;
     volatile uint32_t snapshotPublishFailureCount_ = 0;
+    uint32_t primaryProviderErrorCount_ = 0;
+    uint32_t fallbackAttemptCount_ = 0;
+    uint32_t fallbackSuccessCount_ = 0;
+    uint32_t fallbackFailureCount_ = 0;
+    bool tokenValidCache_ = false;
+    uint32_t tokenExpiresInMsCache_ = 0;
     char lastError_[64] = "not requested";
+    char lastAuthError_[80] = "not requested";
+    volatile bool authInvalidateRequested_ = false;
+    mutable char lastErrorCopy_[64] = "not requested";
+    mutable char lastAuthErrorCopy_[80] = "not requested";
 
     static void taskEntry(void *arg);
     void taskLoop();
+    void handlePendingAuthInvalidation();
+    void updateAuthStatusCache();
+    void recordFallbackStats(bool fallbackSucceeded);
     bool copyRuntimeConfig(AppConfig &config, UserSettings &settings, uint32_t &requestIntervalMs);
     void publishSnapshot(const OpenSkyProvider &provider,
                          bool requestOk,
@@ -106,5 +142,9 @@ private:
                              const char *lastError,
                              bool requestOk,
                              uint32_t completedMs,
-                             uint32_t durationMs);
+                             uint32_t durationMs,
+                             bool fallbackAttempted,
+                             bool fallbackSucceeded,
+                             int primaryHttpStatusCode,
+                             const char *primaryError);
 };

@@ -148,6 +148,16 @@ const char *apiErrorKindName(ApiErrorKind kind)
 
 bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &settings, uint32_t requestIntervalMs)
 {
+    if (mutex_ == nullptr)
+    {
+        mutex_ = xSemaphoreCreateMutex();
+        if (mutex_ == nullptr)
+        {
+            DebugLog::println("OpenSkyAsyncUpdater: mutex allocation failed.");
+            return false;
+        }
+    }
+
     if (taskHandle_ != nullptr)
     {
         AppConfig updatedConfig = config;
@@ -176,12 +186,7 @@ bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &set
     requestIntervalMs_ = requestIntervalMs;
     nextRequestMs_ = 0;
     authClient_.begin();
-    mutex_ = xSemaphoreCreateMutex();
-    if (mutex_ == nullptr)
-    {
-        DebugLog::println("OpenSkyAsyncUpdater: mutex allocation failed.");
-        return false;
-    }
+    updateAuthStatusCache();
 
     stopRequested_ = false;
     running_ = true;
@@ -249,43 +254,102 @@ bool OpenSkyAsyncUpdater::isUpdating() const
 
 int OpenSkyAsyncUpdater::lastHttpStatus() const
 {
-    return lastHttpStatus_;
+    OpenSkyAsyncStatus status;
+    return copyStatus(status) ? status.lastHttpStatus : lastHttpStatus_;
 }
 
 uint32_t OpenSkyAsyncUpdater::lastSuccessMs() const
 {
-    return lastSuccessMs_;
+    OpenSkyAsyncStatus status;
+    return copyStatus(status) ? status.lastSuccessMs : lastSuccessMs_;
 }
 
 const char *OpenSkyAsyncUpdater::lastError() const
 {
-    return lastError_;
+    OpenSkyAsyncStatus status;
+    if (copyStatus(status))
+    {
+        strncpy(lastErrorCopy_, status.lastError, sizeof(lastErrorCopy_) - 1);
+        lastErrorCopy_[sizeof(lastErrorCopy_) - 1] = '\0';
+    }
+    return lastErrorCopy_;
 }
 
 uint32_t OpenSkyAsyncUpdater::snapshotPublishFailureCount() const
 {
-    return snapshotPublishFailureCount_;
+    OpenSkyAsyncStatus status;
+    return copyStatus(status) ? status.snapshotPublishFailureCount : snapshotPublishFailureCount_;
 }
 
 bool OpenSkyAsyncUpdater::tokenValid() const
 {
-    return authClient_.isAuthenticated();
+    OpenSkyAsyncStatus status;
+    return copyStatus(status) ? status.tokenValid : false;
 }
 
 uint32_t OpenSkyAsyncUpdater::tokenExpiresInMs() const
 {
-    return authClient_.tokenExpiresInMs();
+    OpenSkyAsyncStatus status;
+    return copyStatus(status) ? status.tokenExpiresInMs : 0;
 }
 
 const char *OpenSkyAsyncUpdater::lastAuthError() const
 {
-    return authClient_.lastError();
+    OpenSkyAsyncStatus status;
+    if (copyStatus(status))
+    {
+        strncpy(lastAuthErrorCopy_, status.lastAuthError, sizeof(lastAuthErrorCopy_) - 1);
+        lastAuthErrorCopy_[sizeof(lastAuthErrorCopy_) - 1] = '\0';
+    }
+    return lastAuthErrorCopy_;
 }
 
 void OpenSkyAsyncUpdater::invalidateAuthToken()
 {
-    authClient_.invalidateToken();
-    DebugLog::println("OpenSky auth: token cleared by serial command.");
+    authInvalidateRequested_ = true;
+    if (taskHandle_ == nullptr && mutex_ != nullptr && xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        authClient_.invalidateToken();
+        updateAuthStatusCache();
+        authInvalidateRequested_ = false;
+        xSemaphoreGive(mutex_);
+    }
+    DebugLog::println("OpenSky auth: token invalidation requested.");
+}
+
+bool OpenSkyAsyncUpdater::copyStatus(OpenSkyAsyncStatus &status) const
+{
+    if (mutex_ == nullptr)
+    {
+        status.running = running_;
+        status.updating = updating_;
+        return false;
+    }
+
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(5)) != pdTRUE)
+    {
+        status.running = running_;
+        status.updating = updating_;
+        return false;
+    }
+
+    status.running = running_;
+    status.updating = updating_;
+    status.lastHttpStatus = lastHttpStatus_;
+    status.lastSuccessMs = lastSuccessMs_;
+    status.snapshotPublishFailureCount = snapshotPublishFailureCount_;
+    status.primaryProviderErrorCount = primaryProviderErrorCount_;
+    status.fallbackAttemptCount = fallbackAttemptCount_;
+    status.fallbackSuccessCount = fallbackSuccessCount_;
+    status.fallbackFailureCount = fallbackFailureCount_;
+    status.tokenValid = tokenValidCache_;
+    status.tokenExpiresInMs = tokenExpiresInMsCache_;
+    strncpy(status.lastError, lastError_, sizeof(status.lastError) - 1);
+    status.lastError[sizeof(status.lastError) - 1] = '\0';
+    strncpy(status.lastAuthError, lastAuthError_, sizeof(status.lastAuthError) - 1);
+    status.lastAuthError[sizeof(status.lastAuthError) - 1] = '\0';
+    xSemaphoreGive(mutex_);
+    return true;
 }
 
 void OpenSkyAsyncUpdater::taskEntry(void *arg)
@@ -300,6 +364,8 @@ void OpenSkyAsyncUpdater::taskLoop()
 
     while (!stopRequested_)
     {
+        handlePendingAuthInvalidation();
+
         const uint32_t now = millis();
         if (WiFi.status() != WL_CONNECTED)
         {
@@ -332,6 +398,10 @@ void OpenSkyAsyncUpdater::taskLoop()
         uint8_t aircraftCount = 0;
         bool publishAdsbFi = useAdsbFi;
         bool primaryRateLimited = false;
+        bool fallbackAttempted = false;
+        bool fallbackSucceeded = false;
+        int primaryHttpStatusCode = 0;
+        char primaryError[64] = "";
         if (useAdsbFi)
         {
             requestOk = adsbFiProvider.requestAircraft(localSettings);
@@ -340,10 +410,17 @@ void OpenSkyAsyncUpdater::taskLoop()
             primaryRateLimited = httpStatus == 429;
             if (!requestOk)
             {
+                fallbackAttempted = true;
+                primaryHttpStatusCode = httpStatus;
+                strncpy(primaryError, adsbFiProvider.lastError(), sizeof(primaryError) - 1);
+                primaryError[sizeof(primaryError) - 1] = '\0';
                 DebugLog::printf("[adsb.fi] request failed: HTTP %d %s, trying OpenSky fallback\r\n",
                                  httpStatus,
                                  adsbFiProvider.lastError());
                 const bool fallbackOk = openSkyProvider.requestStates(localConfig, localSettings, &authClient_);
+                fallbackSucceeded = apiResultIsOk(classifyApiResult(fallbackOk,
+                                                                     openSkyProvider.httpStatusCode(),
+                                                                     openSkyProvider.aircraftCount()));
                 DebugLog::printf("[OpenSky fallback] HTTP %d aircraft=%u status=%s\r\n",
                                  openSkyProvider.httpStatusCode(),
                                  openSkyProvider.aircraftCount(),
@@ -353,6 +430,7 @@ void OpenSkyAsyncUpdater::taskLoop()
                 aircraftCount = openSkyProvider.aircraftCount();
                 publishAdsbFi = false;
                 providerName = "OpenSky fallback";
+                recordFallbackStats(fallbackSucceeded);
             }
         }
         else
@@ -372,11 +450,44 @@ void OpenSkyAsyncUpdater::taskLoop()
 
         if (publishAdsbFi)
         {
-            publishSnapshot(adsbFiProvider, requestOk, completedMs, durationMs);
+            publishSnapshotData(adsbFiProvider.aircraft(),
+                                adsbFiProvider.aircraftCount(),
+                                adsbFiProvider.rawStateCount(),
+                                adsbFiProvider.validPositionCount(),
+                                adsbFiProvider.httpStatusCode(),
+                                adsbFiProvider.payloadLength(),
+                                adsbFiProvider.lastSuccessMs(),
+                                adsbFiProvider.lastError(),
+                                requestOk,
+                                completedMs,
+                                durationMs,
+                                false,
+                                false,
+                                0,
+                                "");
         }
         else
         {
-            publishSnapshot(openSkyProvider, requestOk, completedMs, durationMs);
+            publishSnapshotData(openSkyProvider.aircraft(),
+                                openSkyProvider.aircraftCount(),
+                                openSkyProvider.rawStateCount(),
+                                openSkyProvider.validPositionCount(),
+                                openSkyProvider.httpStatusCode(),
+                                openSkyProvider.payloadLength(),
+                                openSkyProvider.lastSuccessMs(),
+                                openSkyProvider.lastError(),
+                                requestOk,
+                                completedMs,
+                                durationMs,
+                                fallbackAttempted,
+                                fallbackSucceeded,
+                                primaryHttpStatusCode,
+                                primaryError);
+        }
+        if (mutex_ != nullptr && xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            updateAuthStatusCache();
+            xSemaphoreGive(mutex_);
         }
         updating_ = false;
 
@@ -394,6 +505,56 @@ void OpenSkyAsyncUpdater::taskLoop()
     running_ = false;
     taskHandle_ = nullptr;
     vTaskDelete(nullptr);
+}
+
+void OpenSkyAsyncUpdater::handlePendingAuthInvalidation()
+{
+    if (!authInvalidateRequested_)
+    {
+        return;
+    }
+
+    if (mutex_ != nullptr && xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        authClient_.invalidateToken();
+        authInvalidateRequested_ = false;
+        updateAuthStatusCache();
+        xSemaphoreGive(mutex_);
+        DebugLog::println("OpenSky auth: token cleared by updater task.");
+    }
+}
+
+void OpenSkyAsyncUpdater::updateAuthStatusCache()
+{
+    tokenValidCache_ = authClient_.isAuthenticated();
+    tokenExpiresInMsCache_ = authClient_.tokenExpiresInMs();
+    strncpy(lastAuthError_, authClient_.lastError(), sizeof(lastAuthError_) - 1);
+    lastAuthError_[sizeof(lastAuthError_) - 1] = '\0';
+}
+
+void OpenSkyAsyncUpdater::recordFallbackStats(bool fallbackSucceeded)
+{
+    if (mutex_ == nullptr)
+    {
+        return;
+    }
+
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(50)) != pdTRUE)
+    {
+        return;
+    }
+
+    ++primaryProviderErrorCount_;
+    ++fallbackAttemptCount_;
+    if (fallbackSucceeded)
+    {
+        ++fallbackSuccessCount_;
+    }
+    else
+    {
+        ++fallbackFailureCount_;
+    }
+    xSemaphoreGive(mutex_);
 }
 
 bool OpenSkyAsyncUpdater::copyRuntimeConfig(AppConfig &config, UserSettings &settings, uint32_t &requestIntervalMs)
@@ -432,7 +593,11 @@ void OpenSkyAsyncUpdater::publishSnapshot(const OpenSkyProvider &provider,
                         provider.lastError(),
                         requestOk,
                         completedMs,
-                        durationMs);
+                        durationMs,
+                        false,
+                        false,
+                        0,
+                        "");
 }
 
 void OpenSkyAsyncUpdater::publishSnapshot(const AdsbFiProvider &provider,
@@ -450,7 +615,11 @@ void OpenSkyAsyncUpdater::publishSnapshot(const AdsbFiProvider &provider,
                         provider.lastError(),
                         requestOk,
                         completedMs,
-                        durationMs);
+                        durationMs,
+                        false,
+                        false,
+                        0,
+                        "");
 }
 
 void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
@@ -463,7 +632,11 @@ void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
                                               const char *lastError,
                                               bool requestOk,
                                               uint32_t completedMs,
-                                              uint32_t durationMs)
+                                              uint32_t durationMs,
+                                              bool fallbackAttempted,
+                                              bool fallbackSucceeded,
+                                              int primaryHttpStatusCode,
+                                              const char *primaryError)
 {
     OpenSkySnapshot next;
     next.aircraftCount = aircraftCount;
@@ -477,8 +650,16 @@ void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
     next.requestOk = requestOk;
     next.resultStatus = classifyApiResult(requestOk, httpStatusCode, aircraftCount);
     next.errorKind = classifyApiErrorKind(requestOk, httpStatusCode, lastError);
+    next.fallbackAttempted = fallbackAttempted;
+    next.fallbackSucceeded = fallbackSucceeded;
+    next.primaryHttpStatusCode = primaryHttpStatusCode;
+    next.primaryErrorKind = fallbackAttempted ?
+                            classifyApiErrorKind(false, primaryHttpStatusCode, primaryError) :
+                            ApiErrorKind::None;
     strncpy(next.lastError, lastError != nullptr ? lastError : "unknown", sizeof(next.lastError) - 1);
     next.lastError[sizeof(next.lastError) - 1] = '\0';
+    strncpy(next.primaryError, primaryError != nullptr ? primaryError : "", sizeof(next.primaryError) - 1);
+    next.primaryError[sizeof(next.primaryError) - 1] = '\0';
 
     for (uint8_t i = 0; i < next.aircraftCount; ++i)
     {
@@ -492,7 +673,8 @@ void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
         return;
     }
 
-    while (!stopRequested_)
+    const uint32_t publishStartedMs = millis();
+    while (true)
     {
         if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(250)) == pdTRUE)
         {
@@ -508,6 +690,10 @@ void OpenSkyAsyncUpdater::publishSnapshotData(const ApiAircraft *aircraft,
                 return;
             }
             xSemaphoreGive(mutex_);
+        }
+        if (stopRequested_ && millis() - publishStartedMs >= 1500)
+        {
+            break;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
     }

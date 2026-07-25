@@ -227,6 +227,30 @@ void LongRunStats::updateBootTemperature(int16_t temperatureCx10)
 #endif
 }
 
+bool LongRunStats::updateBootUnixTimeIfUnknown(uint32_t bootUnixTime,
+                                               uint32_t uptimeSeconds,
+                                               int16_t temperatureCx10)
+{
+#if ENABLE_LONG_RUN_STATS
+    if (data_.lastBootUnixTime != 0 || bootUnixTime < 1700000000UL)
+    {
+        return data_.lastBootUnixTime != 0;
+    }
+
+    data_.lastBootUnixTime = bootUnixTime;
+    touchEvent(bootUnixTime + uptimeSeconds, uptimeSeconds);
+    captureHeap();
+    captureTemperature(temperatureCx10);
+    save();
+    return true;
+#else
+    (void)bootUnixTime;
+    (void)uptimeSeconds;
+    (void)temperatureCx10;
+    return false;
+#endif
+}
+
 void LongRunStats::updateUptime(uint32_t uptimeSeconds)
 {
 #if ENABLE_LONG_RUN_STATS

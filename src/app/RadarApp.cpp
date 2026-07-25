@@ -497,9 +497,11 @@ void RadarApp::beginApiTest()
 {
     setDeviceState(DeviceState::Running);
     DebugLog::println("Starting ApiTest mode.");
+    DebugLog::println("ApiTest ignores run schedule by design.");
     DebugLog::println("Logs use the upload USB/UART port at 115200 baud.");
     apiTestView_.begin();
     startWifiManagerFromSettings();
+    timeManager_.begin(settings_);
     renderApiTestScreen();
     printApiTestSerialStatus();
 }
@@ -2481,6 +2483,9 @@ void RadarApp::printDeviceStateStatus()
 
 SystemStatus RadarApp::getSystemStatus() const
 {
+    OpenSkyAsyncStatus asyncStatus;
+    realApiUpdater_.copyStatus(asyncStatus);
+
     SystemStatus status;
     status.deviceState = deviceState_;
     status.appMode = config_.appMode;
@@ -2490,8 +2495,8 @@ SystemStatus RadarApp::getSystemStatus() const
                                       configPortal_.mode() == ConfigPortalMode::StaSettings;
     status.setupPortalRunning = configPortal_.isRunning() &&
                                 configPortal_.mode() == ConfigPortalMode::ApSetup;
-    status.apiUpdaterRunning = realApiUpdater_.isRunning();
-    status.apiUpdaterUpdating = realApiUpdater_.isUpdating();
+    status.apiUpdaterRunning = asyncStatus.running;
+    status.apiUpdaterUpdating = asyncStatus.updating;
     status.ntpSynced = timeManager_.isTimeSynced();
     status.withinSchedule = !settings_.schedule.enabled ||
                             (status.ntpSynced &&
@@ -2501,9 +2506,9 @@ SystemStatus RadarApp::getSystemStatus() const
     status.freeHeap = ESP.getFreeHeap();
     status.minFreeHeap = ESP.getMinFreeHeap();
     status.maxAllocHeap = ESP.getMaxAllocHeap();
-    status.lastApiSuccessMs = realApiUpdater_.lastSuccessMs();
+    status.lastApiSuccessMs = asyncStatus.lastSuccessMs;
     status.lastApiErrorMs = lastApiErrorMs_;
-    status.lastHttpCode = realApiUpdater_.lastHttpStatus();
+    status.lastHttpCode = asyncStatus.lastHttpStatus;
     status.apiRequestCount = apiRequestCount_;
     status.apiErrorCount = apiErrorCount_;
     if (debugMode_ == DebugMode::UiLab)
@@ -2577,6 +2582,19 @@ void RadarApp::updateLongRunStats(uint32_t now)
     {
         bootTemperatureCaptured_ = true;
         longRunStats_.updateBootTemperature(lastTemperatureCx10_);
+    }
+
+    if (!bootUnixTimeBackfilled_ && timeManager_.isTimeSynced())
+    {
+        const uint32_t uptimeSeconds = now / 1000UL;
+        const uint32_t currentUnixTime = currentUnixTimeForStats();
+        if (currentUnixTime > 1700000000UL && currentUnixTime > uptimeSeconds)
+        {
+            bootUnixTimeBackfilled_ =
+                longRunStats_.updateBootUnixTimeIfUnknown(currentUnixTime - uptimeSeconds,
+                                                          uptimeSeconds,
+                                                          currentTemperatureCx10ForStats());
+        }
     }
 
     if (lastLongRunStatsSaveMs_ == 0 ||
@@ -2656,6 +2674,9 @@ void RadarApp::recordApiResultForStats(ApiResultStatus resultStatus, int httpSta
 
 void RadarApp::printApiAuthStatus()
 {
+    OpenSkyAsyncStatus asyncStatus;
+    realApiUpdater_.copyStatus(asyncStatus);
+
     DebugLog::println("API/auth status:");
     DebugLog::printf("  provider=%s\r\n", apiProviderName(settings_.api.provider));
     DebugLog::printf("  accountMode=%s\r\n", apiAccountModeName(settings_.api.accountMode));
@@ -2663,20 +2684,32 @@ void RadarApp::printApiAuthStatus()
     {
         DebugLog::println("  adsb.fi Open Data uses no OAuth token.");
         DebugLog::printf("  lastHttpStatus=%d lastApiError=%s\r\n",
-                         realApiUpdater_.lastHttpStatus(),
-                         realApiUpdater_.lastError());
+                         asyncStatus.lastHttpStatus,
+                         asyncStatus.lastError);
+        DebugLog::printf("  fallback attempt=%lu success=%lu failure=%lu primaryErrors=%lu publishFail=%lu\r\n",
+                         static_cast<unsigned long>(asyncStatus.fallbackAttemptCount),
+                         static_cast<unsigned long>(asyncStatus.fallbackSuccessCount),
+                         static_cast<unsigned long>(asyncStatus.fallbackFailureCount),
+                         static_cast<unsigned long>(asyncStatus.primaryProviderErrorCount),
+                         static_cast<unsigned long>(asyncStatus.snapshotPublishFailureCount));
         return;
     }
     DebugLog::printf("  hasClientId=%u hasClientSecret=%u\r\n",
                      settings_.api.openSkyClientId[0] != '\0' ? 1 : 0,
                      settings_.api.openSkyClientSecret[0] != '\0' ? 1 : 0);
     DebugLog::printf("  tokenValid=%u tokenExpiresIn=%lus\r\n",
-                     realApiUpdater_.tokenValid() ? 1 : 0,
-                     static_cast<unsigned long>(realApiUpdater_.tokenExpiresInMs() / 1000UL));
-    DebugLog::printf("  lastAuthError=%s\r\n", realApiUpdater_.lastAuthError());
+                     asyncStatus.tokenValid ? 1 : 0,
+                     static_cast<unsigned long>(asyncStatus.tokenExpiresInMs / 1000UL));
+    DebugLog::printf("  lastAuthError=%s\r\n", asyncStatus.lastAuthError);
     DebugLog::printf("  lastHttpStatus=%d lastApiError=%s\r\n",
-                     realApiUpdater_.lastHttpStatus(),
-                     realApiUpdater_.lastError());
+                     asyncStatus.lastHttpStatus,
+                     asyncStatus.lastError);
+    DebugLog::printf("  fallback attempt=%lu success=%lu failure=%lu primaryErrors=%lu publishFail=%lu\r\n",
+                     static_cast<unsigned long>(asyncStatus.fallbackAttemptCount),
+                     static_cast<unsigned long>(asyncStatus.fallbackSuccessCount),
+                     static_cast<unsigned long>(asyncStatus.fallbackFailureCount),
+                     static_cast<unsigned long>(asyncStatus.primaryProviderErrorCount),
+                     static_cast<unsigned long>(asyncStatus.snapshotPublishFailureCount));
 }
 
 void RadarApp::clearAuthToken()
@@ -3167,6 +3200,8 @@ void RadarApp::updateApiTest(uint32_t now)
         setDeviceState(DeviceState::Running, "WiFi reconnected");
     }
 
+    timeManager_.update();
+
     if (wifi_.isConnected() &&
         (lastApiRequestMs_ == 0 || now - lastApiRequestMs_ >= activeRequestIntervalMs(settings_)))
     {
@@ -3231,6 +3266,12 @@ void RadarApp::updateRealRadar(uint32_t now)
         beginStaSettingsServer();
         timeManager_.begin(settings_);
         lastScheduleCheckMs_ = 0;
+    }
+
+    OpenSkySnapshot pendingSnapshot;
+    if (realApiUpdater_.copySnapshot(pendingSnapshot))
+    {
+        handleRealRadarSnapshot(pendingSnapshot, now);
     }
 
     if (!updateRealRadarRunGate(now, false))
@@ -3393,6 +3434,9 @@ void RadarApp::renderApiTestScreen()
 
 void RadarApp::updateRealRadarStatus()
 {
+    OpenSkyAsyncStatus asyncStatus;
+    realApiUpdater_.copyStatus(asyncStatus);
+
     if (!wifi_.isConnected())
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "WIFI LOST");
@@ -3407,14 +3451,14 @@ void RadarApp::updateRealRadarStatus()
         return;
     }
 
-    if (realApiUpdater_.isUpdating())
+    if (asyncStatus.updating)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "UPDATING");
         return;
     }
 
-    const char *apiError = realApiUpdater_.lastError();
-    const char *authError = realApiUpdater_.lastAuthError();
+    const char *apiError = asyncStatus.lastError;
+    const char *authError = asyncStatus.lastAuthError;
     if (settings_.api.provider == ApiProvider::OpenSky &&
         ((apiError != nullptr && strncmp(apiError, "AUTH CONFIG", 11) == 0) ||
          (authError != nullptr && strncmp(authError, "AUTH CONFIG", 11) == 0)))
@@ -3431,32 +3475,32 @@ void RadarApp::updateRealRadarStatus()
         return;
     }
 
-    if (realApiUpdater_.lastHttpStatus() == 429)
+    if (asyncStatus.lastHttpStatus == 429)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "HTTP 429");
         return;
     }
 
-    if (realApiUpdater_.lastHttpStatus() == 401)
+    if (asyncStatus.lastHttpStatus == 401)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "HTTP 401");
         return;
     }
 
-    if (realApiUpdater_.lastHttpStatus() != 0 && realApiUpdater_.lastHttpStatus() != 200)
+    if (asyncStatus.lastHttpStatus != 0 && asyncStatus.lastHttpStatus != 200)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "API ERROR");
         return;
     }
 
-    if (realApiUpdater_.lastHttpStatus() == 0)
+    if (asyncStatus.lastHttpStatus == 0)
     {
         snprintf(realRadarStatus_, sizeof(realRadarStatus_), "NO DATA");
         return;
     }
 
-    const uint32_t ageSec = realApiUpdater_.lastSuccessMs() > 0 ?
-                            (millis() - realApiUpdater_.lastSuccessMs()) / 1000 :
+    const uint32_t ageSec = asyncStatus.lastSuccessMs > 0 ?
+                            (millis() - asyncStatus.lastSuccessMs) / 1000 :
                             0;
     if (ageSec > 300)
     {
@@ -3547,6 +3591,14 @@ void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t
                      apiResultStatusName(snapshot.resultStatus),
                      apiErrorKindName(snapshot.errorKind),
                      snapshot.lastError);
+    if (snapshot.fallbackAttempted)
+    {
+        DebugLog::printf("  fallback primaryHttp=%d primaryError=%s primaryKind=%s fallback=%s\r\n",
+                         snapshot.primaryHttpStatusCode,
+                         snapshot.primaryError,
+                         apiErrorKindName(snapshot.primaryErrorKind),
+                         snapshot.fallbackSucceeded ? "success" : "failure");
+    }
 
     recordApiResultForStats(snapshot.resultStatus, snapshot.httpStatusCode, now);
 

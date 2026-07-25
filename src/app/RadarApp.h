@@ -128,6 +128,7 @@ private:
     uint32_t lastHeapLowStatsMs_ = 0;
     int16_t lastTemperatureCx10_ = INT16_MIN;
     bool bootTemperatureCaptured_ = false;
+    bool bootUnixTimeBackfilled_ = false;
     bool heapLowActive_ = false;
     bool bootConnectPendingAppStart_ = false;
 

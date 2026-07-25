@@ -49,6 +49,9 @@ public:
                        uint32_t thresholdBytes,
                        int16_t temperatureCx10);
     void updateBootTemperature(int16_t temperatureCx10);
+    bool updateBootUnixTimeIfUnknown(uint32_t bootUnixTime,
+                                     uint32_t uptimeSeconds,
+                                     int16_t temperatureCx10);
     void updateUptime(uint32_t uptimeSeconds);
     void printStats() const;
     void clear();
