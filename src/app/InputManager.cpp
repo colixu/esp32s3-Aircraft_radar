@@ -391,6 +391,11 @@ void InputManager::handleSerialLine()
         return;
     }
 
+    if (parseLongRunStatsCommand(lineBuffer_))
+    {
+        return;
+    }
+
     if (parseUiTuningCommand(lineBuffer_))
     {
         return;
@@ -507,6 +512,47 @@ bool InputManager::parseVirtualButtonCommand(char *line)
 
     pushEvent(event);
     DebugLog::printf("Virtual button: %s %s\r\n", up ? "up" : "down", action);
+    return true;
+#endif
+}
+
+bool InputManager::parseLongRunStatsCommand(char *line)
+{
+    if (line == nullptr)
+    {
+        return false;
+    }
+
+    char original[kLineBufferSize];
+    strncpy(original, line, sizeof(original) - 1);
+    original[sizeof(original) - 1] = '\0';
+
+    char *token = strtok(line, " \t");
+    if (token == nullptr || !equalsIgnoreCase(token, "log"))
+    {
+        strncpy(line, original, kLineBufferSize - 1);
+        line[kLineBufferSize - 1] = '\0';
+        return false;
+    }
+
+#if !ENABLE_LONG_RUN_STATS
+    DebugLog::println("Long run stats are disabled in this build.");
+    return true;
+#else
+    char *action = strtok(nullptr, " \t");
+    if (action == nullptr || equalsIgnoreCase(action, "stat"))
+    {
+        pushEvent(InputEvent::PrintLongRunStats);
+        return true;
+    }
+
+    if (equalsIgnoreCase(action, "clear"))
+    {
+        pushEvent(InputEvent::ClearLongRunStats);
+        return true;
+    }
+
+    DebugLog::println("Unknown log command. Use: log, log stat, log clear");
     return true;
 #endif
 }

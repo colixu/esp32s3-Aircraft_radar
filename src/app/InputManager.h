@@ -51,6 +51,7 @@ private:
     void handleSerialCommand(char command);
     void handleSerialLine();
     bool parseVirtualButtonCommand(char *line);
+    bool parseLongRunStatsCommand(char *line);
     bool parseUiTuningCommand(char *line);
     void updateButtons();
     void updateBootButton();

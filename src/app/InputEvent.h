@@ -44,5 +44,8 @@ enum class InputEvent
     PrintApiAuthStatus,
     ClearAuthToken,
 
+    PrintLongRunStats,
+    ClearLongRunStats,
+
     Reboot
 };

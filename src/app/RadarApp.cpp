@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 #include <driver/temp_sensor.h>
+#include <esp_system.h>
 #include <math.h>
 #include <string.h>
 
@@ -14,6 +15,9 @@ namespace
     constexpr uint32_t kScheduleCheckIntervalMs = 5000;
     constexpr uint32_t kSystemStatusLogIntervalMs = 60000;
     constexpr uint32_t kTemperatureLogIntervalMs = 1000;
+    constexpr uint32_t kLongRunStatsSaveIntervalMs = 30UL * 60UL * 1000UL;
+    constexpr uint32_t kHeapLowStatsIntervalMs = 10UL * 60UL * 1000UL;
+    constexpr uint32_t kHeapLowThresholdBytes = 60000;
     constexpr uint32_t kLocalMenuTimeoutMs = 30000;
     constexpr uint32_t kLocalMenuOpenLongGuardMs = 8000;
     constexpr uint32_t kLocalMenuRefreshMs = 500;
@@ -184,6 +188,16 @@ namespace
 
         return temperatureC;
     }
+
+    int16_t temperatureToCx10(float temperatureC)
+    {
+        if (isnan(temperatureC))
+        {
+            return INT16_MIN;
+        }
+
+        return static_cast<int16_t>(lroundf(temperatureC * 10.0f));
+    }
 }
 
 RadarApp::RadarApp() :
@@ -208,6 +222,11 @@ void RadarApp::begin()
     {
         DebugLog::println("Settings load fell back to sanitized defaults.");
     }
+    longRunStats_.begin();
+    longRunStats_.recordBoot(static_cast<uint8_t>(esp_reset_reason()),
+                             0,
+                             millis() / 1000UL,
+                             temperatureToCx10(readInternalTemperatureC()));
     inputManager_.begin(settings_);
     printSerialHelp();
     beginConfiguredMode();
@@ -249,6 +268,7 @@ void RadarApp::update()
     const uint32_t now = millis();
     updateInput();
     updateTemperatureLog(now);
+    updateLongRunStats(now);
     updateLongRunStatusLog(now);
 
     if (debugMode_ == DebugMode::UiLab)
@@ -720,6 +740,14 @@ void RadarApp::handleInputEvent(InputEvent event)
 
         case InputEvent::ClearAuthToken:
             clearAuthToken();
+            break;
+
+        case InputEvent::PrintLongRunStats:
+            printLongRunStats();
+            break;
+
+        case InputEvent::ClearLongRunStats:
+            clearLongRunStats();
             break;
 
         case InputEvent::Reboot:
@@ -2538,7 +2566,76 @@ void RadarApp::updateTemperatureLog(uint32_t now)
         DebugLog::println("ESP32-S3 internal temperature default: NAN");
         return;
     }
+    lastTemperatureCx10_ = temperatureToCx10(temperatureC);
     DebugLog::printf("ESP32-S3 internal temperature default: %.1f C\r\n", temperatureC);
+}
+
+void RadarApp::updateLongRunStats(uint32_t now)
+{
+#if ENABLE_LONG_RUN_STATS
+    if (!bootTemperatureCaptured_ && lastTemperatureCx10_ != INT16_MIN)
+    {
+        bootTemperatureCaptured_ = true;
+        longRunStats_.updateBootTemperature(lastTemperatureCx10_);
+    }
+
+    if (lastLongRunStatsSaveMs_ == 0 ||
+        now - lastLongRunStatsSaveMs_ >= kLongRunStatsSaveIntervalMs)
+    {
+        lastLongRunStatsSaveMs_ = now;
+        longRunStats_.updateUptime(now / 1000UL);
+    }
+
+    const uint32_t freeHeap = ESP.getFreeHeap();
+    if (freeHeap < kHeapLowThresholdBytes)
+    {
+        if (!heapLowActive_ ||
+            lastHeapLowStatsMs_ == 0 ||
+            now - lastHeapLowStatsMs_ >= kHeapLowStatsIntervalMs)
+        {
+            heapLowActive_ = true;
+            lastHeapLowStatsMs_ = now;
+            longRunStats_.recordHeapLow(currentUnixTimeForStats(),
+                                        now / 1000UL,
+                                        kHeapLowThresholdBytes,
+                                        currentTemperatureCx10ForStats());
+        }
+    }
+    else
+    {
+        heapLowActive_ = false;
+    }
+#else
+    (void)now;
+#endif
+}
+
+void RadarApp::printLongRunStats()
+{
+    const bool wasEnabled = DebugLog::isEnabled();
+    DebugLog::setEnabled(true);
+    longRunStats_.updateUptime(millis() / 1000UL);
+    longRunStats_.printStats();
+    DebugLog::setEnabled(wasEnabled);
+}
+
+void RadarApp::clearLongRunStats()
+{
+    const bool wasEnabled = DebugLog::isEnabled();
+    DebugLog::setEnabled(true);
+    longRunStats_.clear();
+    DebugLog::println("LongRunStats cleared.");
+    DebugLog::setEnabled(wasEnabled);
+}
+
+uint32_t RadarApp::currentUnixTimeForStats() const
+{
+    return timeManager_.isTimeSynced() ? timeManager_.getUnixTime() : 0;
+}
+
+int16_t RadarApp::currentTemperatureCx10ForStats() const
+{
+    return lastTemperatureCx10_;
 }
 
 void RadarApp::printApiAuthStatus()
@@ -2745,7 +2842,14 @@ void RadarApp::enterWiFiReconnectMode(const char *reason)
     stopRealRadarUpdater();
     staSettingsOverlayVisible_ = false;
     setDeviceState(DeviceState::WiFiLost, reason);
-    wifiLostSinceMs_ = millis();
+    const uint32_t now = millis();
+    if (wifiLostSinceMs_ == 0)
+    {
+        wifiLostSinceMs_ = now;
+        longRunStats_.recordWifiLost(currentUnixTimeForStats(),
+                                     now / 1000UL,
+                                     currentTemperatureCx10ForStats());
+    }
 
     if (!renderer_.isReady())
     {
@@ -3029,6 +3133,11 @@ void RadarApp::updateApiTest(uint32_t now)
 
     if (wifiLostSinceMs_ != 0 || deviceState_ == DeviceState::WiFiLost)
     {
+        const uint32_t lostSeconds = wifiLostSinceMs_ != 0 ? (now - wifiLostSinceMs_) / 1000UL : 0;
+        longRunStats_.recordWifiReconnected(currentUnixTimeForStats(),
+                                            now / 1000UL,
+                                            lostSeconds,
+                                            currentTemperatureCx10ForStats());
         wifiLostSinceMs_ = 0;
         if (bootConnectPendingAppStart_)
         {
@@ -3072,11 +3181,8 @@ void RadarApp::updateRealRadar(uint32_t now)
     {
         if (wifiLostSinceMs_ == 0)
         {
-            wifiLostSinceMs_ = now;
-            stopRealRadarUpdater();
             DebugLog::println("[WiFi] Lost connection, background reconnect only");
-            setDeviceState(DeviceState::WiFiLost, "WiFi lost");
-            renderRealRadarSystemStatus();
+            enterWiFiReconnectMode("WiFi lost");
         }
         else if (now - lastFrameMs_ >= 1000)
         {
@@ -3088,6 +3194,11 @@ void RadarApp::updateRealRadar(uint32_t now)
 
     if (wifiLostSinceMs_ != 0 || deviceState_ == DeviceState::WiFiLost)
     {
+        const uint32_t lostSeconds = wifiLostSinceMs_ != 0 ? (now - wifiLostSinceMs_) / 1000UL : 0;
+        longRunStats_.recordWifiReconnected(currentUnixTimeForStats(),
+                                            now / 1000UL,
+                                            lostSeconds,
+                                            currentTemperatureCx10ForStats());
         wifiLostSinceMs_ = 0;
         if (bootConnectPendingAppStart_)
         {
@@ -3417,6 +3528,7 @@ void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t
 
     if (snapshot.requestOk || snapshot.httpStatusCode == 200)
     {
+        longRunStats_.recordApiSuccess();
         RealRadarTrackStats stats;
         realTrackManager_.mergeSnapshot(snapshot, settings_, now, stats);
         realTrackManager_.updatePrediction(settings_, now);
@@ -3427,6 +3539,10 @@ void RadarApp::handleRealRadarSnapshot(const OpenSkySnapshot &snapshot, uint32_t
     {
         ++apiErrorCount_;
         lastApiErrorMs_ = now;
+        longRunStats_.recordApiError(currentUnixTimeForStats(),
+                                     now / 1000UL,
+                                     static_cast<int16_t>(snapshot.httpStatusCode),
+                                     currentTemperatureCx10ForStats());
         DebugLog::println("  API snapshot failed, keeping current tracks.");
     }
 

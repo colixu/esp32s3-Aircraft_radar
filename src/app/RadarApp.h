@@ -14,6 +14,7 @@
 #include "../ui/RadarUiTuning.h"
 #include "ConfigPortal.h"
 #include "InputManager.h"
+#include "LongRunStats.h"
 #include "SettingsStore.h"
 #include "SystemStatus.h"
 #include "TimeManager.h"
@@ -66,6 +67,7 @@ private:
     FakeDataProvider dataProvider_;
     RadarRenderer renderer_;
     TimeManager timeManager_;
+    LongRunStats longRunStats_;
     WifiManagerSimple wifi_;
     OpenSkyProvider openSky_;
     OpenSkyAsyncUpdater realApiUpdater_;
@@ -122,6 +124,11 @@ private:
     uint32_t idleUiPreviewUntilMs_ = 0;
     uint32_t idleUiPreviewRefreshMs_ = 0;
     uint32_t idleUiPreviewApiIntervalMs_ = 0;
+    uint32_t lastLongRunStatsSaveMs_ = 0;
+    uint32_t lastHeapLowStatsMs_ = 0;
+    int16_t lastTemperatureCx10_ = INT16_MIN;
+    bool bootTemperatureCaptured_ = false;
+    bool heapLowActive_ = false;
     bool bootConnectPendingAppStart_ = false;
 
     void beginConfiguredMode();
@@ -187,6 +194,11 @@ private:
     SystemStatus getSystemStatus() const;
     void updateLongRunStatusLog(uint32_t now);
     void updateTemperatureLog(uint32_t now);
+    void updateLongRunStats(uint32_t now);
+    void printLongRunStats();
+    void clearLongRunStats();
+    uint32_t currentUnixTimeForStats() const;
+    int16_t currentTemperatureCx10ForStats() const;
     void printApiAuthStatus();
     void clearAuthToken();
     void enterSetupPortal(const char *reason);

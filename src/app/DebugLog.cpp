@@ -5,6 +5,11 @@
 
 namespace DebugLog
 {
+    namespace
+    {
+        bool enabled_ = false;
+    }
+
     void begin(uint32_t baud)
     {
         // ESP32-S3 boards vary: DevKitC often exposes UART0, while SuperMini
@@ -13,26 +18,52 @@ namespace DebugLog
         Serial0.begin(baud);
     }
 
+    void setEnabled(bool enabled)
+    {
+        enabled_ = enabled;
+    }
+
+    bool isEnabled()
+    {
+        return enabled_;
+    }
+
     void print(const char *message)
     {
+        if (!enabled_)
+        {
+            return;
+        }
         Serial.print(message);
         Serial0.print(message);
     }
 
     void println()
     {
+        if (!enabled_)
+        {
+            return;
+        }
         Serial.println();
         Serial0.println();
     }
 
     void println(const char *message)
     {
+        if (!enabled_)
+        {
+            return;
+        }
         Serial.println(message);
         Serial0.println(message);
     }
 
     void printf(const char *format, ...)
     {
+        if (!enabled_)
+        {
+            return;
+        }
         char buffer[256];
 
         va_list args;
