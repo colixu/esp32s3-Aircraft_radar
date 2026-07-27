@@ -28,6 +28,12 @@ namespace
     constexpr uint32_t kIdleRangePreviewMs = 10UL * 60UL * 1000UL;
     constexpr uint32_t kIdleRangePreviewRefreshMs = 10000;
     constexpr uint32_t kIdleRangePreviewApiIntervalMs = 5UL * 60UL * 1000UL;
+    constexpr uint32_t kInitialEmptyRadarRetryWindowMs = 60UL * 1000UL;
+    constexpr uint32_t kInitialEmptyRadarRetryAdsbMs = 5000;
+    constexpr uint32_t kInitialEmptyRadarRetryOpenSkyMs = 10000;
+    constexpr uint32_t kRealRadarEmptyRecoveryDelayMs = 2UL * 60UL * 1000UL;
+    constexpr uint32_t kRealRadarEmptyRecoveryAdsbMs = 30000;
+    constexpr uint32_t kRealRadarEmptyRecoveryOpenSkyMs = 2UL * 60UL * 1000UL;
     constexpr uint8_t kLocalMenuItemCount = 7;
     constexpr uint8_t kBrightnessLevelCount = 4;
 
@@ -223,6 +229,7 @@ void RadarApp::begin()
         DebugLog::println("Settings load fell back to sanitized defaults.");
     }
     longRunStats_.begin();
+    configPortal_.setLongRunStats(&longRunStats_);
     longRunStats_.recordBoot(static_cast<uint8_t>(esp_reset_reason()),
                              0,
                              millis() / 1000UL,
@@ -537,6 +544,11 @@ void RadarApp::beginRealRadar()
                          effectiveFetchRangeKm(settings_));
     }
     currentRealApiIntervalMs_ = activeRequestIntervalMs(settings_);
+    realRadarStartedMs_ = millis();
+    lastInitialEmptyRadarRetryMs_ = 0;
+    realRadarNoAircraftSinceMs_ = 0;
+    lastRealRadarEmptyRecoveryMs_ = 0;
+    realRadarTrafficSeen_ = false;
     DebugLog::printf("RealRadar API interval: %lu ms (%s)\r\n",
                      static_cast<unsigned long>(currentRealApiIntervalMs_),
                      refreshPolicyName(settings_.api.refreshPolicy));
@@ -3005,6 +3017,109 @@ void RadarApp::ensureRealRadarUpdaterRunning()
     }
 }
 
+void RadarApp::maybeRetryInitialEmptyRadar(uint32_t now)
+{
+    if (realRadarTrafficSeen_ || realAircraftCount_ > 0)
+    {
+        realRadarTrafficSeen_ = true;
+        return;
+    }
+
+    if (realRadarStartedMs_ == 0 ||
+        now - realRadarStartedMs_ > kInitialEmptyRadarRetryWindowMs)
+    {
+        return;
+    }
+
+    if (!realApiUpdater_.isRunning() || realApiUpdater_.isUpdating())
+    {
+        return;
+    }
+
+    OpenSkyAsyncStatus asyncStatus;
+    if (!realApiUpdater_.copyStatus(asyncStatus))
+    {
+        return;
+    }
+
+    if (asyncStatus.lastHttpStatus == 0 ||
+        asyncStatus.lastHttpStatus == 401 ||
+        asyncStatus.lastHttpStatus == 403 ||
+        asyncStatus.lastHttpStatus == 429)
+    {
+        return;
+    }
+
+    const uint32_t retryIntervalMs = settings_.api.provider == ApiProvider::OpenSky ?
+                                     kInitialEmptyRadarRetryOpenSkyMs :
+                                     kInitialEmptyRadarRetryAdsbMs;
+    if (lastInitialEmptyRadarRetryMs_ != 0 &&
+        now - lastInitialEmptyRadarRetryMs_ < retryIntervalMs)
+    {
+        return;
+    }
+
+    lastInitialEmptyRadarRetryMs_ = now;
+    DebugLog::printf("Initial RealRadar has no visible aircraft, retry API soon. http=%d filtered=%u\r\n",
+                     asyncStatus.lastHttpStatus,
+                     lastRealRadarFilteredCount_);
+    realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_);
+}
+
+void RadarApp::maybeRecoverEmptyRealRadar(uint32_t now)
+{
+    if (!realRadarTrafficSeen_ || realAircraftCount_ > 0)
+    {
+        return;
+    }
+
+    if (deviceState_ != DeviceState::Running || !wifi_.isConnected())
+    {
+        return;
+    }
+
+    if (realRadarNoAircraftSinceMs_ == 0 ||
+        now - realRadarNoAircraftSinceMs_ < kRealRadarEmptyRecoveryDelayMs)
+    {
+        return;
+    }
+
+    if (!realApiUpdater_.isRunning() || realApiUpdater_.isUpdating())
+    {
+        return;
+    }
+
+    const uint32_t retryIntervalMs = settings_.api.provider == ApiProvider::OpenSky ?
+                                     kRealRadarEmptyRecoveryOpenSkyMs :
+                                     kRealRadarEmptyRecoveryAdsbMs;
+    if (lastRealRadarEmptyRecoveryMs_ != 0 &&
+        now - lastRealRadarEmptyRecoveryMs_ < retryIntervalMs)
+    {
+        return;
+    }
+
+    OpenSkyAsyncStatus asyncStatus;
+    if (!realApiUpdater_.copyStatus(asyncStatus))
+    {
+        return;
+    }
+
+    if (asyncStatus.lastHttpStatus == 401 ||
+        asyncStatus.lastHttpStatus == 403 ||
+        asyncStatus.lastHttpStatus == 429)
+    {
+        return;
+    }
+
+    lastRealRadarEmptyRecoveryMs_ = now;
+    DebugLog::printf("RealRadar empty recovery: empty=%lus http=%d filtered=%u last=%s\r\n",
+                     static_cast<unsigned long>((now - realRadarNoAircraftSinceMs_) / 1000UL),
+                     asyncStatus.lastHttpStatus,
+                     lastRealRadarFilteredCount_,
+                     asyncStatus.lastError);
+    realApiUpdater_.begin(config_, settings_, currentRealApiIntervalMs_);
+}
+
 void RadarApp::stopRealRadarUpdater()
 {
     if (realApiUpdater_.isRunning() || realApiUpdater_.isUpdating())
@@ -3320,6 +3435,8 @@ void RadarApp::updateRealRadar(uint32_t now)
     realTrackManager_.updatePrediction(settings_, now);
     RealRadarTrackStats frameStats;
     rebuildRealRadarAircraft(frameStats);
+    maybeRetryInitialEmptyRadar(now);
+    maybeRecoverEmptyRealRadar(now);
     if (now - lastPredictionSummaryMs_ >= 10000)
     {
         lastPredictionSummaryMs_ = now;
@@ -3628,6 +3745,18 @@ void RadarApp::rebuildRealRadarAircraft(RealRadarTrackStats &stats)
                                   stats.filteredAltitude +
                                   stats.filteredSpeed +
                                   stats.filteredRange;
+    if (realAircraftCount_ > 0)
+    {
+        realRadarTrafficSeen_ = true;
+        realRadarNoAircraftSinceMs_ = 0;
+        lastRealRadarEmptyRecoveryMs_ = 0;
+        return;
+    }
+
+    if (realRadarTrafficSeen_ && realRadarNoAircraftSinceMs_ == 0)
+    {
+        realRadarNoAircraftSinceMs_ = millis();
+    }
 }
 
 void RadarApp::printRealRadarTrackSummary(const OpenSkySnapshot &snapshot, const RealRadarTrackStats &stats)

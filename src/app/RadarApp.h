@@ -115,6 +115,10 @@ private:
     uint32_t lastIdleDelayMs_ = UINT32_MAX;
     uint32_t wifiLostSinceMs_ = 0;
     uint32_t currentRealApiIntervalMs_ = 0;
+    uint32_t realRadarStartedMs_ = 0;
+    uint32_t lastInitialEmptyRadarRetryMs_ = 0;
+    uint32_t realRadarNoAircraftSinceMs_ = 0;
+    uint32_t lastRealRadarEmptyRecoveryMs_ = 0;
     uint32_t apiRequestCount_ = 0;
     uint32_t apiErrorCount_ = 0;
     uint32_t lastApiErrorMs_ = 0;
@@ -131,6 +135,7 @@ private:
     bool bootUnixTimeBackfilled_ = false;
     bool heapLowActive_ = false;
     bool bootConnectPendingAppStart_ = false;
+    bool realRadarTrafficSeen_ = false;
 
     void beginConfiguredMode();
     uint32_t computeIdleDelayMs() const;
@@ -214,6 +219,8 @@ private:
     void startWifiManagerFromSettings();
     bool updateRealRadarRunGate(uint32_t now, bool forceCheck);
     void ensureRealRadarUpdaterRunning();
+    void maybeRetryInitialEmptyRadar(uint32_t now);
+    void maybeRecoverEmptyRealRadar(uint32_t now);
     void stopRealRadarUpdater();
     void renderRealRadarSystemStatus();
     void renderPausedIdleFrame(bool force);

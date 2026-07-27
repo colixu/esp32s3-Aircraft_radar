@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "DebugLog.h"
+#include "LongRunStats.h"
 
 namespace
 {
@@ -191,6 +192,10 @@ void ConfigPortal::beginServer()
     {
         handleRestart();
     });
+    server_.on("/clearLongRunStats", HTTP_POST, [this]()
+    {
+        handleClearLongRunStats();
+    });
     server_.onNotFound([this]()
     {
         handleNotFound();
@@ -198,6 +203,11 @@ void ConfigPortal::beginServer()
     server_.begin();
 
     running_ = true;
+}
+
+void ConfigPortal::setLongRunStats(LongRunStats *longRunStats)
+{
+    longRunStats_ = longRunStats;
 }
 
 void ConfigPortal::update()
@@ -331,7 +341,7 @@ void ConfigPortal::handleStatus()
         return;
     }
 
-    char body[1536];
+    static char body[1536];
     snprintf(body,
              sizeof(body),
              "{\"portalMode\":\"%s\",\"apSsid\":\"%s\",\"apIp\":\"%s\",\"staIp\":\"%s\","
@@ -437,6 +447,31 @@ void ConfigPortal::handleRestart()
     write("</h1><p>");
     write(text("The device will restart shortly.", "设备即将重启。"));
     write("</p>");
+    sendPageFooter();
+}
+
+void ConfigPortal::handleClearLongRunStats()
+{
+    updateLanguageFromRequest();
+    const bool cleared = longRunStats_ != nullptr;
+    if (longRunStats_ != nullptr)
+    {
+        longRunStats_->clear();
+    }
+
+    sendPageHeader(text("Long run stats", "长期测试统计"));
+    write("<h1>");
+    write(text("Long run stats", "长期测试统计"));
+    write("</h1><p>");
+    write(cleared ? text("Long run statistics were cleared. WiFi and user settings were kept.",
+                         "长期测试统计已清除。WiFi 和用户设置已保留。") :
+                    text("Long run statistics are unavailable in this build.",
+                         "当前固件无法访问长期测试统计。"));
+    write("</p><p><a href=\"/?lang=");
+    write(languageCode());
+    write("\">");
+    write(text("Back to settings", "返回设置"));
+    write("</a></p>");
     sendPageFooter();
 }
 
@@ -665,6 +700,7 @@ void ConfigPortal::renderProductSimplePage()
     write("<fieldset><legend>操作</legend>");
     write("<p>保存设置后，部分 WiFi 或启动相关配置需要重启后完整生效。</p>");
     write("<button type=\"submit\">保存设置</button>");
+    write("<button type=\"submit\" formaction=\"/clearLongRunStats\" formmethod=\"post\">&#28165;&#38500;&#38271;&#26399;&#27979;&#35797;&#32479;&#35745;</button>");
     write("<a href=\"/restart?lang=");
     write(languageCode());
     write("\">重启设备</a>");

@@ -85,6 +85,7 @@ void InputManager::begin(const UserSettings &settings)
     eventTail_ = 0;
     eventCount_ = 0;
     lineLength_ = 0;
+    lastLineCharMs_ = 0;
     uiCommandPending_ = false;
     memset(lineBuffer_, 0, sizeof(lineBuffer_));
     memset(&pendingUiCommand_, 0, sizeof(pendingUiCommand_));
@@ -115,6 +116,12 @@ void InputManager::update()
     while (Serial0.available() > 0)
     {
         handleSerialInput(static_cast<char>(Serial0.read()), Serial0);
+    }
+
+    if (lineLength_ > 0 &&
+        millis() - lastLineCharMs_ >= kSerialLineIdleCommitMs)
+    {
+        commitSerialLine();
     }
 
     updateButtons();
@@ -172,21 +179,20 @@ void InputManager::handleSerialInput(char command, Stream &serial)
     {
         if (command == '\r' || command == '\n')
         {
-            lineBuffer_[lineLength_] = '\0';
-            handleSerialLine();
-            lineLength_ = 0;
-            lineBuffer_[0] = '\0';
+            commitSerialLine();
             return;
         }
 
         if (lineLength_ < kLineBufferSize - 1)
         {
             lineBuffer_[lineLength_++] = command;
+            lastLineCharMs_ = millis();
         }
         else
         {
             lineLength_ = 0;
             lineBuffer_[0] = '\0';
+            lastLineCharMs_ = 0;
             DebugLog::println("Serial line too long, dropped.");
         }
         return;
@@ -198,6 +204,7 @@ void InputManager::handleSerialInput(char command, Stream &serial)
         {
             lineBuffer_[0] = command;
             lineLength_ = 1;
+            lastLineCharMs_ = millis();
             return;
         }
 
@@ -206,6 +213,7 @@ void InputManager::handleSerialInput(char command, Stream &serial)
         {
             lineBuffer_[0] = command;
             lineLength_ = 1;
+            lastLineCharMs_ = millis();
             return;
         }
     }
@@ -216,6 +224,7 @@ void InputManager::handleSerialInput(char command, Stream &serial)
         {
             lineBuffer_[0] = command;
             lineLength_ = 1;
+            lastLineCharMs_ = millis();
             return;
         }
 
@@ -226,11 +235,29 @@ void InputManager::handleSerialInput(char command, Stream &serial)
         {
             lineBuffer_[0] = command;
             lineLength_ = 1;
+            lastLineCharMs_ = millis();
             return;
         }
     }
 
+    if (command == 'l' || command == 'L')
+    {
+        lineBuffer_[0] = command;
+        lineLength_ = 1;
+        lastLineCharMs_ = millis();
+        return;
+    }
+
     handleSerialCommand(command);
+}
+
+void InputManager::commitSerialLine()
+{
+    lineBuffer_[lineLength_] = '\0';
+    handleSerialLine();
+    lineLength_ = 0;
+    lineBuffer_[0] = '\0';
+    lastLineCharMs_ = 0;
 }
 
 void InputManager::handleSerialCommand(char command)
@@ -533,7 +560,8 @@ bool InputManager::parseLongRunStatsCommand(char *line)
     original[sizeof(original) - 1] = '\0';
 
     char *token = strtok(line, " \t");
-    if (token == nullptr || !equalsIgnoreCase(token, "log"))
+    if (token == nullptr ||
+        (!equalsIgnoreCase(token, "log") && !equalsIgnoreCase(token, "l")))
     {
         strncpy(line, original, kLineBufferSize - 1);
         line[kLineBufferSize - 1] = '\0';
@@ -551,7 +579,7 @@ bool InputManager::parseLongRunStatsCommand(char *line)
         return true;
     }
 
-    if (equalsIgnoreCase(action, "clear"))
+    if (equalsIgnoreCase(action, "clear") || equalsIgnoreCase(action, "clean"))
     {
         pushEvent(InputEvent::ClearLongRunStats);
         return true;

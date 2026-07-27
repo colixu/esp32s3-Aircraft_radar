@@ -192,7 +192,7 @@ bool OpenSkyAsyncUpdater::begin(const AppConfig &config, const UserSettings &set
     running_ = true;
     const BaseType_t created = xTaskCreatePinnedToCore(taskEntry,
                                                        "OpenSkyUpdateTask",
-                                                       12288,
+                                                       24576,
                                                        this,
                                                        1,
                                                        &taskHandle_,

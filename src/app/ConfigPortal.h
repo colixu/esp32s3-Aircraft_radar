@@ -7,6 +7,8 @@
 #include "SettingsStore.h"
 #include "UserSettings.h"
 
+class LongRunStats;
+
 enum class ConfigPortalMode
 {
     ApSetup,
@@ -21,6 +23,7 @@ public:
     bool beginStaSettings(UserSettings *settings, SettingsStore *settingsStore);
     void update();
     void stop();
+    void setLongRunStats(LongRunStats *longRunStats);
 
     bool isRunning() const;
     ConfigPortalMode mode() const;
@@ -44,6 +47,7 @@ private:
     DNSServer dnsServer_;
     UserSettings *settings_ = nullptr;
     SettingsStore *settingsStore_ = nullptr;
+    LongRunStats *longRunStats_ = nullptr;
     bool running_ = false;
     bool restartRequested_ = false;
     bool dnsRunning_ = false;
@@ -63,6 +67,7 @@ private:
     void handleStatus();
     void handleWifiScan();
     void handleRestart();
+    void handleClearLongRunStats();
     void handleNotFound();
 
     void renderSimplePage();

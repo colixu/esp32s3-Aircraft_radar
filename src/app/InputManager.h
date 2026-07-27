@@ -24,6 +24,7 @@ public:
 private:
     static constexpr uint8_t kEventQueueSize = 8;
     static constexpr uint8_t kLineBufferSize = 128;
+    static constexpr uint32_t kSerialLineIdleCommitMs = 250;
 
     int buttonPin_ = -1;
     uint32_t inputStartedMs_ = 0;
@@ -37,6 +38,7 @@ private:
     uint8_t eventCount_ = 0;
     char lineBuffer_[kLineBufferSize] = {};
     uint8_t lineLength_ = 0;
+    uint32_t lastLineCharMs_ = 0;
     UiTuningCommand pendingUiCommand_ = {};
     bool uiCommandPending_ = false;
     bool bootLastRawPressed_ = false;
@@ -50,6 +52,7 @@ private:
     void handleSerialInput(char command, Stream &serial);
     void handleSerialCommand(char command);
     void handleSerialLine();
+    void commitSerialLine();
     bool parseVirtualButtonCommand(char *line);
     bool parseLongRunStatsCommand(char *line);
     bool parseUiTuningCommand(char *line);

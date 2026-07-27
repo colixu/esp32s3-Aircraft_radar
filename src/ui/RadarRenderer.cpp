@@ -1086,11 +1086,11 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
     const uint16_t typeColor = tft_.color565(90, 200, 255);
     const uint16_t bg = modernBackgroundColor();
 
-    PlaneRadarDrawItem dots[PlaneRadarTheme::maxDrawItems];
-    PlaneRadarDrawItem items[PlaneRadarTheme::maxDrawItems];
+    static PlaneRadarDrawItem dots[PlaneRadarTheme::maxDrawItems];
+    static PlaneRadarDrawItem items[PlaneRadarTheme::maxDrawItems];
     uint8_t dotCount = 0;
     uint8_t itemCount = 0;
-    LabelRect usedLabels[PlaneRadarTheme::maxReservedRects];
+    static LabelRect usedLabels[PlaneRadarTheme::maxReservedRects];
     uint8_t usedLabelCount = 0;
 
     (void)reserveLabelRect(usedLabels,
@@ -1194,16 +1194,16 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
         return;
     }
 
-    LabelRect baseLabels[PlaneRadarTheme::maxReservedRects];
+    static LabelRect baseLabels[PlaneRadarTheme::maxReservedRects];
     memcpy(baseLabels, usedLabels, sizeof(baseLabels));
     const uint8_t baseLabelCount = usedLabelCount;
 
-    bool fixedLabel[PlaneRadarTheme::maxDrawItems];
-    uint8_t deferredItems[PlaneRadarTheme::maxDrawItems];
+    static bool fixedLabel[PlaneRadarTheme::maxDrawItems];
+    static uint8_t deferredItems[PlaneRadarTheme::maxDrawItems];
     memset(fixedLabel, 0, sizeof(fixedLabel));
     memset(deferredItems, 0, sizeof(deferredItems));
 
-    LabelRect dryRunLabels[PlaneRadarTheme::maxReservedRects];
+    static LabelRect dryRunLabels[PlaneRadarTheme::maxReservedRects];
     memcpy(dryRunLabels, baseLabels, sizeof(dryRunLabels));
     uint8_t dryRunLabelCount = baseLabelCount;
     uint8_t deferredCount = 0;
