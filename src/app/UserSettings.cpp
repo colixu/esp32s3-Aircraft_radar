@@ -189,7 +189,7 @@ void loadDefaultUserSettings(UserSettings &settings, const AppConfig &config)
     settings.prediction.correctionStartDistanceKm = 0.5f;
 
     settings.system.uiButtonPin = -1;
-    settings.system.serialDebug = true;
+    settings.system.serialDebug = false;
     settings.system.wifiTxPowerQuarterDbm = 60;
 
     sanitizeUserSettings(settings);

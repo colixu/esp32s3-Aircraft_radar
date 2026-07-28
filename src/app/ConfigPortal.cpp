@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "DebugLog.h"
+#include "FeatureFlags.h"
 #include "LongRunStats.h"
 
 namespace
@@ -192,10 +193,12 @@ void ConfigPortal::beginServer()
     {
         handleRestart();
     });
+#if ENABLE_LONG_RUN_STATS
     server_.on("/clearLongRunStats", HTTP_POST, [this]()
     {
         handleClearLongRunStats();
     });
+#endif
     server_.onNotFound([this]()
     {
         handleNotFound();
@@ -700,7 +703,6 @@ void ConfigPortal::renderProductSimplePage()
     write("<fieldset><legend>操作</legend>");
     write("<p>保存设置后，部分 WiFi 或启动相关配置需要重启后完整生效。</p>");
     write("<button type=\"submit\">保存设置</button>");
-    write("<button type=\"submit\" formaction=\"/clearLongRunStats\" formmethod=\"post\">&#28165;&#38500;&#38271;&#26399;&#27979;&#35797;&#32479;&#35745;</button>");
     write("<a href=\"/restart?lang=");
     write(languageCode());
     write("\">重启设备</a>");

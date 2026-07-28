@@ -228,12 +228,14 @@ void RadarApp::begin()
     {
         DebugLog::println("Settings load fell back to sanitized defaults.");
     }
+#if ENABLE_LONG_RUN_STATS
     longRunStats_.begin();
     configPortal_.setLongRunStats(&longRunStats_);
     longRunStats_.recordBoot(static_cast<uint8_t>(esp_reset_reason()),
                              0,
                              millis() / 1000UL,
                              temperatureToCx10(readInternalTemperatureC()));
+#endif
     inputManager_.begin(settings_);
     printSerialHelp();
     beginConfiguredMode();
@@ -274,8 +276,12 @@ void RadarApp::update()
 {
     const uint32_t now = millis();
     updateInput();
+#if ENABLE_INTERNAL_TEMPERATURE_MONITOR || ENABLE_LONG_RUN_STATS
     updateTemperatureLog(now);
+#endif
+#if ENABLE_LONG_RUN_STATS
     updateLongRunStats(now);
+#endif
     updateLongRunStatusLog(now);
 
     if (debugMode_ == DebugMode::UiLab)
