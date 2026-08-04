@@ -7,7 +7,9 @@
 
 #include "DebugLog.h"
 #include "FeatureFlags.h"
+#if ENABLE_LONG_RUN_STATS
 #include "LongRunStats.h"
+#endif
 
 namespace
 {
@@ -208,10 +210,12 @@ void ConfigPortal::beginServer()
     running_ = true;
 }
 
+#if ENABLE_LONG_RUN_STATS
 void ConfigPortal::setLongRunStats(LongRunStats *longRunStats)
 {
     longRunStats_ = longRunStats;
 }
+#endif
 
 void ConfigPortal::update()
 {
@@ -453,6 +457,7 @@ void ConfigPortal::handleRestart()
     sendPageFooter();
 }
 
+#if ENABLE_LONG_RUN_STATS
 void ConfigPortal::handleClearLongRunStats()
 {
     updateLanguageFromRequest();
@@ -477,6 +482,7 @@ void ConfigPortal::handleClearLongRunStats()
     write("</a></p>");
     sendPageFooter();
 }
+#endif
 
 void ConfigPortal::handleNotFound()
 {
@@ -653,8 +659,8 @@ void ConfigPortal::renderProductSimplePage()
     sendSelectOption("16", "16", settings.display.maxAircraftToDisplay == 16);
     sendSelectOption("24", "24", settings.display.maxAircraftToDisplay >= 24);
     write("</select></label>");
-    sendCheckbox("显示飞机标签", "showLabels", settings.display.showLabels);
-    write("<p class=\"hint\">标签通常显示 callsign；选中飞机或特定 UI 可能显示高度、速度或距离。</p>");
+    sendCheckbox("显示飞机信息", "showLabels", settings.display.showLabels);
+    write("<p class=\"hint\">开启后会在飞机旁显示航班号、机型/速度和高度等信息；关闭后只显示飞机图标、速度向量和边缘点，适合飞机密集时使用。</p>");
     sendCheckbox("显示地面目标", "showGroundTraffic", settings.filter.showGroundTraffic);
     snprintf(value, sizeof(value), "%.1f", settings.filter.minAirborneAltitudeM);
     sendNumberInput("最小空中高度 m", "minAirborneAltitudeM", value, "0.1");
@@ -1093,10 +1099,10 @@ void ConfigPortal::renderAdvancedPage()
     write("</legend>");
     snprintf(value, sizeof(value), "%u", settings.display.maxAircraftToDisplay);
     sendNumberInput(text("Max aircraft to display", "最大显示飞机数"), "maxAircraftToDisplay", value, "1");
-    sendCheckbox(text("Show labels", "显示标签"), "showLabels", settings.display.showLabels);
+    sendCheckbox(text("Show aircraft info", "显示飞机信息"), "showLabels", settings.display.showLabels);
     write("<p class=\"hint\">");
-    write(text("Labels show aircraft callsign near the target. Selected aircraft may also show altitude, speed, or distance depending on the current UI theme.",
-               "标签会在飞机目标附近显示航班号。被选中的飞机可能还会根据当前界面风格显示高度、速度或距离。"));
+    write(text("Aircraft info shows callsign, type/speed, and altitude near the target. Turn it off to keep only aircraft symbols, vectors, and edge dots.",
+               "飞机信息会在目标附近显示航班号、机型/速度和高度。关闭后只保留飞机图标、速度向量和边缘点，适合飞机密集时使用。"));
     write("</p>");
     const uint8_t brightnessPercent = static_cast<uint8_t>((static_cast<uint16_t>(settings.display.brightness) * 100U + 127U) / 255U);
     snprintf(value, sizeof(value), "%u", brightnessPercent);

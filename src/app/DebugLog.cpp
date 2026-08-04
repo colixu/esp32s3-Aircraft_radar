@@ -3,6 +3,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include "FeatureFlags.h"
+
 namespace DebugLog
 {
     namespace
@@ -12,10 +14,14 @@ namespace DebugLog
 
     void begin(uint32_t baud)
     {
+#if ENABLE_SERIAL_IO
         // ESP32-S3 boards vary: DevKitC often exposes UART0, while SuperMini
         // commonly uses native USB CDC for upload and monitor.
         Serial.begin(baud);
         Serial0.begin(baud);
+#else
+        (void)baud;
+#endif
     }
 
     void setEnabled(bool enabled)
@@ -34,8 +40,12 @@ namespace DebugLog
         {
             return;
         }
+#if ENABLE_SERIAL_IO
         Serial.print(message);
         Serial0.print(message);
+#else
+        (void)message;
+#endif
     }
 
     void println()
@@ -44,8 +54,10 @@ namespace DebugLog
         {
             return;
         }
+#if ENABLE_SERIAL_IO
         Serial.println();
         Serial0.println();
+#endif
     }
 
     void println(const char *message)
@@ -54,8 +66,12 @@ namespace DebugLog
         {
             return;
         }
+#if ENABLE_SERIAL_IO
         Serial.println(message);
         Serial0.println(message);
+#else
+        (void)message;
+#endif
     }
 
     void printf(const char *format, ...)
@@ -64,6 +80,7 @@ namespace DebugLog
         {
             return;
         }
+#if ENABLE_SERIAL_IO
         char buffer[256];
 
         va_list args;
@@ -73,5 +90,8 @@ namespace DebugLog
 
         Serial.print(buffer);
         Serial0.print(buffer);
+#else
+        (void)format;
+#endif
     }
 }

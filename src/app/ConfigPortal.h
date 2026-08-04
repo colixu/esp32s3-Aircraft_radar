@@ -4,10 +4,13 @@
 #include <DNSServer.h>
 #include <WebServer.h>
 
+#include "FeatureFlags.h"
 #include "SettingsStore.h"
 #include "UserSettings.h"
 
+#if ENABLE_LONG_RUN_STATS
 class LongRunStats;
+#endif
 
 enum class ConfigPortalMode
 {
@@ -23,7 +26,9 @@ public:
     bool beginStaSettings(UserSettings *settings, SettingsStore *settingsStore);
     void update();
     void stop();
+#if ENABLE_LONG_RUN_STATS
     void setLongRunStats(LongRunStats *longRunStats);
+#endif
 
     bool isRunning() const;
     ConfigPortalMode mode() const;
@@ -47,7 +52,9 @@ private:
     DNSServer dnsServer_;
     UserSettings *settings_ = nullptr;
     SettingsStore *settingsStore_ = nullptr;
+#if ENABLE_LONG_RUN_STATS
     LongRunStats *longRunStats_ = nullptr;
+#endif
     bool running_ = false;
     bool restartRequested_ = false;
     bool dnsRunning_ = false;
@@ -67,7 +74,9 @@ private:
     void handleStatus();
     void handleWifiScan();
     void handleRestart();
+#if ENABLE_LONG_RUN_STATS
     void handleClearLongRunStats();
+#endif
     void handleNotFound();
 
     void renderSimplePage();

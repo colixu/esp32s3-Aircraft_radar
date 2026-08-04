@@ -2648,20 +2648,24 @@ void RadarApp::updateLongRunStats(uint32_t now)
 
 void RadarApp::printLongRunStats()
 {
+#if ENABLE_LONG_RUN_STATS
     const bool wasEnabled = DebugLog::isEnabled();
     DebugLog::setEnabled(true);
     longRunStats_.updateUptime(millis() / 1000UL);
     longRunStats_.printStats();
     DebugLog::setEnabled(wasEnabled);
+#endif
 }
 
 void RadarApp::clearLongRunStats()
 {
+#if ENABLE_LONG_RUN_STATS
     const bool wasEnabled = DebugLog::isEnabled();
     DebugLog::setEnabled(true);
     longRunStats_.clear();
     DebugLog::println("LongRunStats cleared.");
     DebugLog::setEnabled(wasEnabled);
+#endif
 }
 
 uint32_t RadarApp::currentUnixTimeForStats() const
@@ -2676,6 +2680,7 @@ int16_t RadarApp::currentTemperatureCx10ForStats() const
 
 void RadarApp::recordApiResultForStats(ApiResultStatus resultStatus, int httpStatusCode, uint32_t now)
 {
+#if ENABLE_LONG_RUN_STATS
     if (apiResultIsOk(resultStatus))
     {
         longRunStats_.recordApiSuccess();
@@ -2688,6 +2693,11 @@ void RadarApp::recordApiResultForStats(ApiResultStatus resultStatus, int httpSta
                                  now / 1000UL,
                                  static_cast<int16_t>(httpStatusCode),
                                  currentTemperatureCx10ForStats());
+#else
+    (void)resultStatus;
+    (void)httpStatusCode;
+    (void)now;
+#endif
 }
 
 void RadarApp::printApiAuthStatus()
@@ -2913,9 +2923,11 @@ void RadarApp::enterWiFiReconnectMode(const char *reason)
     if (wifiLostSinceMs_ == 0)
     {
         wifiLostSinceMs_ = now;
+#if ENABLE_LONG_RUN_STATS
         longRunStats_.recordWifiLost(currentUnixTimeForStats(),
                                      now / 1000UL,
                                      currentTemperatureCx10ForStats());
+#endif
     }
 
     if (!renderer_.isReady())
@@ -3304,10 +3316,14 @@ void RadarApp::updateApiTest(uint32_t now)
     if (wifiLostSinceMs_ != 0 || deviceState_ == DeviceState::WiFiLost)
     {
         const uint32_t lostSeconds = wifiLostSinceMs_ != 0 ? (now - wifiLostSinceMs_) / 1000UL : 0;
+#if ENABLE_LONG_RUN_STATS
         longRunStats_.recordWifiReconnected(currentUnixTimeForStats(),
                                             now / 1000UL,
                                             lostSeconds,
                                             currentTemperatureCx10ForStats());
+#else
+        (void)lostSeconds;
+#endif
         wifiLostSinceMs_ = 0;
         if (bootConnectPendingAppStart_)
         {
@@ -3371,10 +3387,14 @@ void RadarApp::updateRealRadar(uint32_t now)
     if (wifiLostSinceMs_ != 0 || deviceState_ == DeviceState::WiFiLost)
     {
         const uint32_t lostSeconds = wifiLostSinceMs_ != 0 ? (now - wifiLostSinceMs_) / 1000UL : 0;
+#if ENABLE_LONG_RUN_STATS
         longRunStats_.recordWifiReconnected(currentUnixTimeForStats(),
                                             now / 1000UL,
                                             lostSeconds,
                                             currentTemperatureCx10ForStats());
+#else
+        (void)lostSeconds;
+#endif
         wifiLostSinceMs_ = 0;
         if (bootConnectPendingAppStart_)
         {
@@ -3790,6 +3810,8 @@ AppConfig RadarApp::runtimeRenderConfig() const
     AppConfig renderConfig = config_;
     renderConfig.maxRangeKm = settings_.location.maxRangeKm;
     renderConfig.fetchRangeKm = effectiveFetchRangeKm(settings_);
+    renderConfig.radarCenterLat = settings_.location.centerLat;
+    renderConfig.radarCenterLon = settings_.location.centerLon;
     renderConfig.showEdgeDots = settings_.display.showEdgeDots &&
                                 uiThemeSupportsEdgeDots(settings_.display.uiTheme);
     renderConfig.showLabels = settings_.display.showLabels;

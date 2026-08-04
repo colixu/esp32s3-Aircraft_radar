@@ -13,8 +13,11 @@
 #include "../ui/RadarRenderer.h"
 #include "../ui/RadarUiTuning.h"
 #include "ConfigPortal.h"
+#include "FeatureFlags.h"
 #include "InputManager.h"
+#if ENABLE_LONG_RUN_STATS
 #include "LongRunStats.h"
+#endif
 #include "SettingsStore.h"
 #include "SystemStatus.h"
 #include "TimeManager.h"
@@ -67,7 +70,9 @@ private:
     FakeDataProvider dataProvider_;
     RadarRenderer renderer_;
     TimeManager timeManager_;
+#if ENABLE_LONG_RUN_STATS
     LongRunStats longRunStats_;
+#endif
     WifiManagerSimple wifi_;
     OpenSkyProvider openSky_;
     OpenSkyAsyncUpdater realApiUpdater_;
@@ -128,12 +133,16 @@ private:
     uint32_t idleUiPreviewUntilMs_ = 0;
     uint32_t idleUiPreviewRefreshMs_ = 0;
     uint32_t idleUiPreviewApiIntervalMs_ = 0;
+#if ENABLE_LONG_RUN_STATS
     uint32_t lastLongRunStatsSaveMs_ = 0;
     uint32_t lastHeapLowStatsMs_ = 0;
+#endif
     int16_t lastTemperatureCx10_ = INT16_MIN;
+#if ENABLE_LONG_RUN_STATS
     bool bootTemperatureCaptured_ = false;
     bool bootUnixTimeBackfilled_ = false;
     bool heapLowActive_ = false;
+#endif
     bool bootConnectPendingAppStart_ = false;
     bool realRadarTrafficSeen_ = false;
 

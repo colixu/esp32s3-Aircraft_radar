@@ -14,6 +14,12 @@ namespace
     constexpr uint32_t kBootIgnoreAfterStartupMs = 500;
     constexpr uint32_t kBootPostEventGuardMs = 100;
 
+    bool timeReached(uint32_t now, uint32_t deadline)
+    {
+        return static_cast<int32_t>(now - deadline) >= 0;
+    }
+
+#if ENABLE_SERIAL_IO
     bool serialDebugDisabledNotified = false;
 
     bool isIgnoredSerialChar(char command)
@@ -51,11 +57,6 @@ namespace
         return *a == '\0' && *b == '\0';
     }
 
-    bool timeReached(uint32_t now, uint32_t deadline)
-    {
-        return static_cast<int32_t>(now - deadline) >= 0;
-    }
-
     void printVirtualButtonHelp()
     {
         DebugLog::println("Unknown button command. Use: btn up short|long|double or btn down short|long|double");
@@ -71,6 +72,7 @@ namespace
         serialDebugDisabledNotified = true;
         DebugLog::println("Serial debug commands disabled. Use virtual button commands.");
     }
+#endif
 }
 
 void InputManager::begin(const UserSettings &settings)
@@ -84,11 +86,13 @@ void InputManager::begin(const UserSettings &settings)
     eventHead_ = 0;
     eventTail_ = 0;
     eventCount_ = 0;
+#if ENABLE_SERIAL_IO
     lineLength_ = 0;
     lastLineCharMs_ = 0;
     uiCommandPending_ = false;
     memset(lineBuffer_, 0, sizeof(lineBuffer_));
     memset(&pendingUiCommand_, 0, sizeof(pendingUiCommand_));
+#endif
     bootLastRawPressed_ = false;
     bootStablePressed_ = false;
     bootLongFired_ = false;
@@ -108,6 +112,7 @@ void InputManager::begin(const UserSettings &settings)
 
 void InputManager::update()
 {
+#if ENABLE_SERIAL_IO
     while (Serial.available() > 0)
     {
         handleSerialInput(static_cast<char>(Serial.read()), Serial);
@@ -123,6 +128,7 @@ void InputManager::update()
     {
         commitSerialLine();
     }
+#endif
 
     updateButtons();
 }
@@ -143,6 +149,7 @@ bool InputManager::popEvent(InputEvent &event)
 
 bool InputManager::popUiTuningCommand(UiTuningCommand &command)
 {
+#if ENABLE_SERIAL_IO
     if (!uiCommandPending_)
     {
         memset(&command, 0, sizeof(command));
@@ -153,6 +160,10 @@ bool InputManager::popUiTuningCommand(UiTuningCommand &command)
     pendingUiCommand_.pending = false;
     uiCommandPending_ = false;
     return true;
+#else
+    memset(&command, 0, sizeof(command));
+    return false;
+#endif
 }
 
 void InputManager::pushEvent(InputEvent event)
@@ -173,6 +184,7 @@ void InputManager::pushEvent(InputEvent event)
     ++eventCount_;
 }
 
+#if ENABLE_SERIAL_IO
 void InputManager::handleSerialInput(char command, Stream &serial)
 {
     if (lineLength_ > 0)
@@ -637,6 +649,7 @@ bool InputManager::parseUiTuningCommand(char *line)
     return true;
 #endif
 }
+#endif
 
 void InputManager::updateButtons()
 {

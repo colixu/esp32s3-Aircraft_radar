@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "FeatureFlags.h"
 #include "InputEvent.h"
 #include "UserSettings.h"
 
@@ -23,8 +24,10 @@ public:
 
 private:
     static constexpr uint8_t kEventQueueSize = 8;
+#if ENABLE_SERIAL_IO
     static constexpr uint8_t kLineBufferSize = 128;
     static constexpr uint32_t kSerialLineIdleCommitMs = 250;
+#endif
 
     int buttonPin_ = -1;
     uint32_t inputStartedMs_ = 0;
@@ -36,11 +39,13 @@ private:
     uint8_t eventHead_ = 0;
     uint8_t eventTail_ = 0;
     uint8_t eventCount_ = 0;
+#if ENABLE_SERIAL_IO
     char lineBuffer_[kLineBufferSize] = {};
     uint8_t lineLength_ = 0;
     uint32_t lastLineCharMs_ = 0;
     UiTuningCommand pendingUiCommand_ = {};
     bool uiCommandPending_ = false;
+#endif
     bool bootLastRawPressed_ = false;
     bool bootStablePressed_ = false;
     bool bootLongFired_ = false;
@@ -49,6 +54,7 @@ private:
     bool bootSuppressClickUntilRelease_ = false;
 
     void pushEvent(InputEvent event);
+#if ENABLE_SERIAL_IO
     void handleSerialInput(char command, Stream &serial);
     void handleSerialCommand(char command);
     void handleSerialLine();
@@ -56,6 +62,7 @@ private:
     bool parseVirtualButtonCommand(char *line);
     bool parseLongRunStatsCommand(char *line);
     bool parseUiTuningCommand(char *line);
+#endif
     void updateButtons();
     void updateBootButton();
 };

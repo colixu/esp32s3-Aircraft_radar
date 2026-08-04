@@ -252,6 +252,10 @@ private:
                                    uint16_t gridColor,
                                    uint16_t textColor,
                                    uint16_t backgroundColor);
+    void drawPlaneRadarStations(TFT_eSprite &canvas,
+                                const AppConfig &config,
+                                uint16_t stationColor,
+                                uint16_t textColor);
     void drawPlaneRadarAircraft(TFT_eSprite &canvas,
                                 const Aircraft *aircraft,
                                 uint8_t aircraftCount,
@@ -289,7 +293,9 @@ private:
                                         uint16_t typeColor,
                                         uint16_t backgroundColor,
                                         bool highlight,
-                                        bool drawContent);
+                                        bool drawContent,
+                                        LabelRect *placedRect = nullptr,
+                                        bool compactLabel = false);
     void drawPlaneRadarBeyondDot(TFT_eSprite &canvas,
                                  const Aircraft &target,
                                  uint16_t aircraftColor);
