@@ -145,9 +145,12 @@ private:
 #endif
     bool bootConnectPendingAppStart_ = false;
     bool realRadarTrafficSeen_ = false;
+    bool watchdogEnabled_ = false;
 
     void beginConfiguredMode();
     uint32_t computeIdleDelayMs() const;
+    void beginWatchdog();
+    void feedWatchdog();
     void enterBootWiFiConnectState();
     void updateConnectWiFi(uint32_t now);
     void finishBootWiFiConnect(bool showEstablishedFrame);
@@ -223,7 +226,6 @@ private:
     void renderSetupPortalFrame(const char *statusText);
     void setDeviceState(DeviceState state, const char *reason = nullptr);
     bool hasConfiguredWiFi() const;
-    bool connectToConfiguredWiFi();
     void enterWiFiReconnectMode(const char *reason);
     void startWifiManagerFromSettings();
     bool updateRealRadarRunGate(uint32_t now, bool forceCheck);

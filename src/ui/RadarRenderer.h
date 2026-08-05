@@ -221,7 +221,8 @@ private:
                                         int16_t y,
                                         bool selected,
                                         LabelRect *usedLabels,
-                                        uint8_t &usedLabelCount);
+                                        uint8_t &usedLabelCount,
+                                        uint8_t usedLabelCapacity);
     void drawModernReferenceBeyondDot(TFT_eSprite &canvas, const Aircraft &target);
     bool modernReferenceToScreen(const Aircraft &target,
                                  const AppConfig &config,
@@ -372,7 +373,8 @@ private:
                                     int16_t y,
                                     bool selected,
                                     LabelRect *usedLabels,
-                                    uint8_t &usedLabelCount);
+                                    uint8_t &usedLabelCount,
+                                    uint8_t usedLabelCapacity);
     void drawCyberpunkStatusText(TFT_eSprite &canvas,
                                  const char *statusText,
                                  uint8_t aircraftCount,

@@ -53,6 +53,8 @@ namespace
         static constexpr int16_t speedLineMaxPx = 28;
     };
 
+    constexpr uint8_t kUiLabelRectCapacity = 32;
+
     // Inspired by MatixYo/ESP32-Plane-Radar:
     // https://github.com/MatixYo/ESP32-Plane-Radar
     struct PlaneRadarTheme
@@ -81,9 +83,8 @@ namespace
         static constexpr float trackLengthScale = 1.5f / 5.0f;
         static constexpr int16_t aircraftTagLabelHeightPx = 13;
         static constexpr uint8_t maxDrawItems = 16;
-        static constexpr uint8_t maxReservedRects = maxDrawItems * 3 + 8;
+        static constexpr uint8_t maxReservedRects = maxDrawItems * 4 + 16;
         static constexpr uint32_t labelRotateMs = 6000;
-        static constexpr int16_t denseGroupDistancePx = 46;
     };
 
     constexpr int16_t kCyberMapWestCoast[][2] =
@@ -587,6 +588,9 @@ void RadarRenderer::drawModernReferenceAircraft(TFT_eSprite &canvas,
         return;
     }
 
+    LabelRect usedLabels[kUiLabelRectCapacity];
+    uint8_t usedLabelCount = 0;
+
     for (uint8_t i = 0; i < aircraftCount; ++i)
     {
         int16_t x = 0;
@@ -597,12 +601,22 @@ void RadarRenderer::drawModernReferenceAircraft(TFT_eSprite &canvas,
             config.showEdgeDots)
         {
             drawModernReferenceBeyondDot(canvas, aircraft[i]);
+            const int16_t dotRadius = ModernRadarTheme::beyondRingDotRadius + 2;
+            const float bearing = aircraft[i].bearingDeg * DEG_TO_RAD;
+            const int16_t dotX = ModernRadarTheme::centerX +
+                                 static_cast<int16_t>(sinf(bearing) * (ModernRadarTheme::centerX - ModernRadarTheme::beyondRingScreenMargin));
+            const int16_t dotY = ModernRadarTheme::centerY -
+                                 static_cast<int16_t>(cosf(bearing) * (ModernRadarTheme::centerY - ModernRadarTheme::beyondRingScreenMargin));
+            (void)reserveLabelRect(usedLabels,
+                                   usedLabelCount,
+                                   {static_cast<int16_t>(dotX - dotRadius),
+                                    static_cast<int16_t>(dotY - dotRadius),
+                                    static_cast<int16_t>(dotRadius * 2),
+                                    static_cast<int16_t>(dotRadius * 2)},
+                                   kUiLabelRectCapacity);
         }
     }
 
-    LabelRect usedLabels[kMaxTrackedLabels];
-    uint8_t usedLabelCount = 0;
-    uint8_t shownLabelCount = 0;
     for (uint8_t i = 0; i < aircraftCount; ++i)
     {
         int16_t x = 0;
@@ -610,23 +624,64 @@ void RadarRenderer::drawModernReferenceAircraft(TFT_eSprite &canvas,
         bool insideOuterRing = false;
         if (modernReferenceToScreen(aircraft[i], config, x, y, insideOuterRing) && insideOuterRing)
         {
+            drawModernReferenceSpeedVector(canvas, aircraft[i], x, y);
             drawModernReferenceAircraftSymbol(canvas, aircraft[i], x, y);
-            if (config.showLabels &&
-                shouldShowAircraftLabel(aircraft[i],
-                                        i,
-                                        selectedAircraftIndex,
-                                        aircraftCount,
-                                        shownLabelCount,
-                                        modernTuning().maxLabels))
+        }
+    }
+
+    if (!config.showLabels)
+    {
+        return;
+    }
+
+    uint8_t shownLabelCount = 0;
+    if (selectedAircraftIndex < aircraftCount)
+    {
+        int16_t x = 0;
+        int16_t y = 0;
+        bool insideOuterRing = false;
+        if (modernReferenceToScreen(aircraft[selectedAircraftIndex], config, x, y, insideOuterRing) &&
+            insideOuterRing)
+        {
+            const uint8_t before = usedLabelCount;
+            drawModernReferenceAircraftTag(canvas,
+                                           aircraft[selectedAircraftIndex],
+                                           x,
+                                           y,
+                                           true,
+                                           usedLabels,
+                                           usedLabelCount,
+                                           kUiLabelRectCapacity);
+            if (usedLabelCount != before)
+            {
+                ++shownLabelCount;
+            }
+        }
+    }
+
+    for (uint8_t i = 0; i < aircraftCount; ++i)
+    {
+        if (i == selectedAircraftIndex)
+        {
+            continue;
+        }
+
+        int16_t x = 0;
+        int16_t y = 0;
+        bool insideOuterRing = false;
+        if (modernReferenceToScreen(aircraft[i], config, x, y, insideOuterRing) && insideOuterRing)
+        {
+            if (aircraft[i].valid)
             {
                 const uint8_t before = usedLabelCount;
                 drawModernReferenceAircraftTag(canvas,
                                                aircraft[i],
                                                x,
                                                y,
-                                               i == selectedAircraftIndex,
+                                               false,
                                                usedLabels,
-                                               usedLabelCount);
+                                               usedLabelCount,
+                                               kUiLabelRectCapacity);
                 if (usedLabelCount != before)
                 {
                     ++shownLabelCount;
@@ -697,7 +752,8 @@ void RadarRenderer::drawModernReferenceAircraftTag(TFT_eSprite &canvas,
                                                    int16_t y,
                                                    bool selected,
                                                    LabelRect *usedLabels,
-                                                   uint8_t &usedLabelCount)
+                                                   uint8_t &usedLabelCount,
+                                                   uint8_t usedLabelCapacity)
 {
     char callsign[16];
     char altitude[16];
@@ -753,7 +809,7 @@ void RadarRenderer::drawModernReferenceAircraftTag(TFT_eSprite &canvas,
             rect = {static_cast<int16_t>(anchorX - labelWidth - 1), static_cast<int16_t>(candidateY - 1), static_cast<int16_t>(labelWidth + 2), static_cast<int16_t>(blockHeight + 2)};
         }
 
-        if (reserveLabelRect(usedLabels, usedLabelCount, rect))
+        if (reserveLabelRect(usedLabels, usedLabelCount, rect, usedLabelCapacity))
         {
             labelY = candidateY;
             reserved = true;
@@ -766,7 +822,7 @@ void RadarRenderer::drawModernReferenceAircraftTag(TFT_eSprite &canvas,
         {
             return;
         }
-        if (usedLabelCount < kMaxTrackedLabels)
+        if (usedLabelCount < usedLabelCapacity)
         {
             usedLabels[usedLabelCount++] = rect;
         }
@@ -1179,6 +1235,58 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
                            {60, 210, 120, 28},
                            PlaneRadarTheme::maxReservedRects);
 
+    {
+        static RadarStation stations[StationModel::kMaxVisibleStations];
+        const uint8_t stationCount = StationModel::buildVisibleStations(config.radarCenterLat,
+                                                                        config.radarCenterLon,
+                                                                        config.maxRangeKm,
+                                                                        stations,
+                                                                        StationModel::kMaxVisibleStations);
+        const float displayRangeKm = max(config.maxRangeKm, 1.0f);
+        const float maxRadius = static_cast<float>(PlaneRadarTheme::outerRadius - 8);
+
+        canvas.setFreeFont(nullptr);
+        canvas.setTextSize(1);
+        for (uint8_t i = 0; i < stationCount; ++i)
+        {
+            const RadarStation &station = stations[i];
+            if (!station.valid || !isfinite(station.distanceKm) || !isfinite(station.bearingDeg))
+            {
+                continue;
+            }
+
+            const float bearing = station.bearingDeg * DEG_TO_RAD;
+            const float radius = constrain((station.distanceKm / displayRangeKm) * maxRadius,
+                                           0.0f,
+                                           maxRadius);
+            const int16_t x = PlaneRadarTheme::centerX + static_cast<int16_t>(lroundf(sinf(bearing) * radius));
+            const int16_t y = PlaneRadarTheme::centerY - static_cast<int16_t>(lroundf(cosf(bearing) * radius));
+            const int16_t labelWidth = canvas.textWidth(station.code, 1);
+            int16_t labelX = x + 7;
+            if (labelX + labelWidth > PlaneRadarTheme::size - 3)
+            {
+                labelX = x - labelWidth - 7;
+            }
+            labelX = constrain(labelX, 3, PlaneRadarTheme::size - labelWidth - 3);
+            const int16_t labelY = constrain(y, 5, PlaneRadarTheme::size - 5);
+
+            (void)reserveLabelRect(usedLabels,
+                                   usedLabelCount,
+                                   {static_cast<int16_t>(x - 5),
+                                    static_cast<int16_t>(y - 5),
+                                    10,
+                                    10},
+                                   PlaneRadarTheme::maxReservedRects);
+            (void)reserveLabelRect(usedLabels,
+                                   usedLabelCount,
+                                   {static_cast<int16_t>(labelX - 1),
+                                    static_cast<int16_t>(labelY - 5),
+                                    static_cast<int16_t>(labelWidth + 2),
+                                    10},
+                                   PlaneRadarTheme::maxReservedRects);
+        }
+    }
+
     for (uint8_t i = 0; i < aircraftCount; ++i)
     {
         int16_t x = 0;
@@ -1252,11 +1360,73 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
         return;
     }
 
+    static LabelRect allFitLabels[PlaneRadarTheme::maxReservedRects];
+    memcpy(allFitLabels, usedLabels, sizeof(allFitLabels));
+    uint8_t allFitLabelCount = usedLabelCount;
+    bool allFullLabelsFit = true;
+    for (uint8_t i = 0; i < itemCount; ++i)
+    {
+        if (!tryDrawPlaneRadarAircraftLabel(canvas,
+                                            aircraft[items[i].index],
+                                            items[i].x,
+                                            items[i].y,
+                                            items[i].index == selectedAircraftIndex,
+                                            allFitLabels,
+                                            allFitLabelCount,
+                                            PlaneRadarTheme::maxReservedRects,
+                                            textColor,
+                                            typeColor,
+                                            bg,
+                                            false,
+                                            false))
+        {
+            allFullLabelsFit = false;
+            break;
+        }
+    }
+
+    if (allFullLabelsFit)
+    {
+        bool drewAllLabels = true;
+        for (uint8_t i = 0; i < itemCount; ++i)
+        {
+            if (!tryDrawPlaneRadarAircraftLabel(canvas,
+                                                aircraft[items[i].index],
+                                                items[i].x,
+                                                items[i].y,
+                                                items[i].index == selectedAircraftIndex,
+                                                usedLabels,
+                                                usedLabelCount,
+                                                PlaneRadarTheme::maxReservedRects,
+                                                textColor,
+                                                typeColor,
+                                                bg,
+                                                false,
+                                                true))
+            {
+                drewAllLabels = false;
+                break;
+            }
+        }
+
+        if (drewAllLabels)
+        {
+            return;
+        }
+    }
+
+    static LabelRect baseLabels[PlaneRadarTheme::maxReservedRects];
+    static LabelRect plannedLabels[PlaneRadarTheme::maxDrawItems];
+    static bool plannedLabelValid[PlaneRadarTheme::maxDrawItems];
     static uint8_t parent[PlaneRadarTheme::maxDrawItems];
     static uint8_t groupId[PlaneRadarTheme::maxDrawItems];
     static uint8_t groupRoot[PlaneRadarTheme::maxDrawItems];
     static uint8_t groupMemberCount[PlaneRadarTheme::maxDrawItems];
     static uint8_t groupMembers[PlaneRadarTheme::maxDrawItems][PlaneRadarTheme::maxDrawItems];
+    memcpy(baseLabels, usedLabels, sizeof(baseLabels));
+    const uint8_t baseLabelCount = usedLabelCount;
+    memset(plannedLabels, 0, sizeof(plannedLabels));
+    memset(plannedLabelValid, 0, sizeof(plannedLabelValid));
     memset(parent, 0, sizeof(parent));
     memset(groupId, 0, sizeof(groupId));
     memset(groupRoot, 0, sizeof(groupRoot));
@@ -1266,19 +1436,33 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
     for (uint8_t i = 0; i < itemCount; ++i)
     {
         parent[i] = i;
+
+        static LabelRect testLabels[PlaneRadarTheme::maxReservedRects];
+        memcpy(testLabels, baseLabels, sizeof(testLabels));
+        uint8_t testLabelCount = baseLabelCount;
+        plannedLabelValid[i] = tryDrawPlaneRadarAircraftLabel(canvas,
+                                                              aircraft[items[i].index],
+                                                              items[i].x,
+                                                              items[i].y,
+                                                              items[i].index == selectedAircraftIndex,
+                                                              testLabels,
+                                                              testLabelCount,
+                                                              PlaneRadarTheme::maxReservedRects,
+                                                              textColor,
+                                                              typeColor,
+                                                              bg,
+                                                              false,
+                                                              false,
+                                                              &plannedLabels[i]);
     }
 
-    constexpr int16_t groupDistance = PlaneRadarTheme::denseGroupDistancePx;
-    constexpr int groupDistanceSq = static_cast<int>(groupDistance) * static_cast<int>(groupDistance);
     for (uint8_t i = 0; i < itemCount; ++i)
     {
         for (uint8_t j = static_cast<uint8_t>(i + 1); j < itemCount; ++j)
         {
-            const int16_t dx = items[i].x - items[j].x;
-            const int16_t dy = items[i].y - items[j].y;
-            const int distanceSq = static_cast<int>(dx) * static_cast<int>(dx) +
-                                   static_cast<int>(dy) * static_cast<int>(dy);
-            if (distanceSq > groupDistanceSq)
+            if (!plannedLabelValid[i] ||
+                !plannedLabelValid[j] ||
+                !labelsOverlap(plannedLabels[i], plannedLabels[j]))
             {
                 continue;
             }
@@ -1371,6 +1555,24 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
                                                 nullptr,
                                                 true))
             {
+                if (items[itemIndex].index == selectedAircraftIndex)
+                {
+                    static LabelRect forcedLabel[1];
+                    uint8_t forcedLabelCount = 0;
+                    (void)tryDrawPlaneRadarAircraftLabel(canvas,
+                                                         aircraft[items[itemIndex].index],
+                                                         items[itemIndex].x,
+                                                         items[itemIndex].y,
+                                                         true,
+                                                         forcedLabel,
+                                                         forcedLabelCount,
+                                                         1,
+                                                         textColor,
+                                                         typeColor,
+                                                         bg,
+                                                         true,
+                                                         true);
+                }
                 continue;
             }
         }
@@ -1386,7 +1588,7 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
             continue;
         }
 
-        if (memberCount == 2)
+        if (memberCount > 1)
         {
             memcpy(testLabels, usedLabels, sizeof(testLabels));
             uint8_t testLabelCount = usedLabelCount;
@@ -1445,64 +1647,67 @@ void RadarRenderer::drawPlaneRadarAircraft(TFT_eSprite &canvas,
                 }
             }
 
-            memcpy(testLabels, usedLabels, sizeof(testLabels));
-            testLabelCount = usedLabelCount;
-            bool bothCompactLabelsFit = true;
-
-            for (uint8_t member = 0; member < memberCount; ++member)
+            if (memberCount == 2)
             {
-                const uint8_t testItemIndex = groupMembers[group][member];
-                if (!tryDrawPlaneRadarAircraftLabel(canvas,
-                                                    aircraft[items[testItemIndex].index],
-                                                    items[testItemIndex].x,
-                                                    items[testItemIndex].y,
-                                                    items[testItemIndex].index == selectedAircraftIndex,
-                                                    testLabels,
-                                                    testLabelCount,
-                                                    PlaneRadarTheme::maxReservedRects,
-                                                    textColor,
-                                                    typeColor,
-                                                    bg,
-                                                    false,
-                                                    false,
-                                                    nullptr,
-                                                    true))
-                {
-                    bothCompactLabelsFit = false;
-                    break;
-                }
-            }
+                memcpy(testLabels, usedLabels, sizeof(testLabels));
+                testLabelCount = usedLabelCount;
+                bool bothCompactLabelsFit = true;
 
-            if (bothCompactLabelsFit)
-            {
-                bool drewBothLabels = true;
                 for (uint8_t member = 0; member < memberCount; ++member)
                 {
-                    const uint8_t itemIndex = groupMembers[group][member];
+                    const uint8_t testItemIndex = groupMembers[group][member];
                     if (!tryDrawPlaneRadarAircraftLabel(canvas,
-                                                        aircraft[items[itemIndex].index],
-                                                        items[itemIndex].x,
-                                                        items[itemIndex].y,
-                                                        items[itemIndex].index == selectedAircraftIndex,
-                                                        usedLabels,
-                                                        usedLabelCount,
+                                                        aircraft[items[testItemIndex].index],
+                                                        items[testItemIndex].x,
+                                                        items[testItemIndex].y,
+                                                        items[testItemIndex].index == selectedAircraftIndex,
+                                                        testLabels,
+                                                        testLabelCount,
                                                         PlaneRadarTheme::maxReservedRects,
                                                         textColor,
                                                         typeColor,
                                                         bg,
                                                         false,
-                                                        true,
+                                                        false,
                                                         nullptr,
                                                         true))
                     {
-                        drewBothLabels = false;
+                        bothCompactLabelsFit = false;
                         break;
                     }
                 }
 
-                if (drewBothLabels)
+                if (bothCompactLabelsFit)
                 {
-                    continue;
+                    bool drewBothLabels = true;
+                    for (uint8_t member = 0; member < memberCount; ++member)
+                    {
+                        const uint8_t itemIndex = groupMembers[group][member];
+                        if (!tryDrawPlaneRadarAircraftLabel(canvas,
+                                                            aircraft[items[itemIndex].index],
+                                                            items[itemIndex].x,
+                                                            items[itemIndex].y,
+                                                            items[itemIndex].index == selectedAircraftIndex,
+                                                            usedLabels,
+                                                            usedLabelCount,
+                                                            PlaneRadarTheme::maxReservedRects,
+                                                            textColor,
+                                                            typeColor,
+                                                            bg,
+                                                            false,
+                                                            true,
+                                                            nullptr,
+                                                            true))
+                        {
+                            drewBothLabels = false;
+                            break;
+                        }
+                    }
+
+                    if (drewBothLabels)
+                    {
+                        continue;
+                    }
                 }
             }
         }
@@ -2387,9 +2592,8 @@ void RadarRenderer::drawCyberpunkAircraftTargets(TFT_eSprite &canvas,
         return;
     }
 
-    LabelRect usedLabels[kMaxTrackedLabels];
+    LabelRect usedLabels[kUiLabelRectCapacity];
     uint8_t usedLabelCount = 0;
-    uint8_t shownLabelCount = 0;
     for (uint8_t i = 0; i < aircraftCount; ++i)
     {
         int16_t x = 0;
@@ -2401,27 +2605,66 @@ void RadarRenderer::drawCyberpunkAircraftTargets(TFT_eSprite &canvas,
         }
 
         const bool selected = i == selectedAircraftIndex;
+        drawCyberpunkSpeedVector(canvas, aircraft[i], x, y);
         drawCyberpunkAircraftSymbol(canvas, aircraft[i], x, y, selected);
-        if (config.showLabels &&
-            shouldShowAircraftLabel(aircraft[i],
-                                    i,
-                                    selectedAircraftIndex,
-                                    aircraftCount,
-                                    shownLabelCount,
-                                    cyberpunkTuning().maxLabels))
+    }
+
+    if (!config.showLabels)
+    {
+        return;
+    }
+
+    uint8_t shownLabelCount = 0;
+    if (selectedAircraftIndex < aircraftCount)
+    {
+        int16_t x = 0;
+        int16_t y = 0;
+        bool inside = false;
+        if (cyberpunkToScreen(aircraft[selectedAircraftIndex], config, x, y, inside) && inside)
         {
             const uint8_t before = usedLabelCount;
             drawCyberpunkAircraftLabel(canvas,
-                                       aircraft[i],
+                                       aircraft[selectedAircraftIndex],
                                        x,
                                        y,
-                                       selected,
+                                       true,
                                        usedLabels,
-                                       usedLabelCount);
+                                       usedLabelCount,
+                                       kUiLabelRectCapacity);
             if (usedLabelCount != before)
             {
                 ++shownLabelCount;
             }
+        }
+    }
+
+    for (uint8_t i = 0; i < aircraftCount; ++i)
+    {
+        if (i == selectedAircraftIndex)
+        {
+            continue;
+        }
+
+        int16_t x = 0;
+        int16_t y = 0;
+        bool inside = false;
+        if (!cyberpunkToScreen(aircraft[i], config, x, y, inside) || !inside || !aircraft[i].valid)
+        {
+            continue;
+        }
+
+        const uint8_t before = usedLabelCount;
+        drawCyberpunkAircraftLabel(canvas,
+                                   aircraft[i],
+                                   x,
+                                   y,
+                                   false,
+                                   usedLabels,
+                                   usedLabelCount,
+                                   kUiLabelRectCapacity);
+        if (usedLabelCount != before)
+        {
+            ++shownLabelCount;
         }
     }
 }
@@ -2517,7 +2760,8 @@ void RadarRenderer::drawCyberpunkAircraftLabel(TFT_eSprite &canvas,
                                                int16_t y,
                                                bool selected,
                                                LabelRect *usedLabels,
-                                               uint8_t &usedLabelCount)
+                                               uint8_t &usedLabelCount,
+                                               uint8_t usedLabelCapacity)
 {
     char callsign[16];
     char altitude[16];
@@ -2573,7 +2817,7 @@ void RadarRenderer::drawCyberpunkAircraftLabel(TFT_eSprite &canvas,
             rect = {static_cast<int16_t>(anchorX - labelWidth - 1), static_cast<int16_t>(candidateY - 1), static_cast<int16_t>(labelWidth + 2), static_cast<int16_t>(blockHeight + 2)};
         }
 
-        if (reserveLabelRect(usedLabels, usedLabelCount, rect))
+        if (reserveLabelRect(usedLabels, usedLabelCount, rect, usedLabelCapacity))
         {
             labelY = candidateY;
             reserved = true;
@@ -2586,7 +2830,7 @@ void RadarRenderer::drawCyberpunkAircraftLabel(TFT_eSprite &canvas,
         {
             return;
         }
-        if (usedLabelCount < kMaxTrackedLabels)
+        if (usedLabelCount < usedLabelCapacity)
         {
             usedLabels[usedLabelCount++] = rect;
         }

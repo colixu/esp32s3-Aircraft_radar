@@ -103,6 +103,7 @@ bool OpenSkyAuthClient::requestToken(const UserSettings &settings)
     client.setInsecure();
 
     HTTPClient https;
+    https.setTimeout(8000);
     if (!https.begin(client, kTokenUrl))
     {
         setError("AUTH TOKEN BEGIN ERR");

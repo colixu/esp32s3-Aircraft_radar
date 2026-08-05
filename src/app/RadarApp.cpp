@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 #include <driver/temp_sensor.h>
+#include <esp_task_wdt.h>
 #include <esp_system.h>
 #include <math.h>
 #include <string.h>
@@ -220,6 +221,7 @@ void RadarApp::begin()
     delay(800);
     DebugLog::println();
     DebugLog::println("ESP32-S3 GC9A01 aircraft radar");
+    beginWatchdog();
     loadDefaultRadarUiTuning(uiTuning_);
     renderer_.setUiTuning(&uiTuning_);
     settingsStore_.begin();
@@ -239,6 +241,7 @@ void RadarApp::begin()
     inputManager_.begin(settings_);
     printSerialHelp();
     beginConfiguredMode();
+    feedWatchdog();
 }
 
 void RadarApp::beginConfiguredMode()
@@ -357,6 +360,45 @@ void RadarApp::idle()
     {
         delay(delayMs);
     }
+
+    feedWatchdog();
+}
+
+void RadarApp::beginWatchdog()
+{
+#if ENABLE_APP_WATCHDOG
+    const esp_err_t initResult = esp_task_wdt_init(APP_WATCHDOG_TIMEOUT_SEC, true);
+    if (initResult != ESP_OK && initResult != ESP_ERR_INVALID_STATE)
+    {
+        DebugLog::printf("[Watchdog] init failed: %d\r\n", static_cast<int>(initResult));
+        watchdogEnabled_ = false;
+        return;
+    }
+
+    const esp_err_t addResult = esp_task_wdt_add(nullptr);
+    if (addResult == ESP_OK || addResult == ESP_ERR_INVALID_STATE)
+    {
+        watchdogEnabled_ = true;
+        DebugLog::printf("[Watchdog] loopTask enabled, timeout=%ds\r\n", APP_WATCHDOG_TIMEOUT_SEC);
+        feedWatchdog();
+        return;
+    }
+
+    DebugLog::printf("[Watchdog] add loopTask failed: %d\r\n", static_cast<int>(addResult));
+    watchdogEnabled_ = false;
+#else
+    watchdogEnabled_ = false;
+#endif
+}
+
+void RadarApp::feedWatchdog()
+{
+#if ENABLE_APP_WATCHDOG
+    if (watchdogEnabled_)
+    {
+        (void)esp_task_wdt_reset();
+    }
+#endif
 }
 
 uint32_t RadarApp::computeIdleDelayMs() const
@@ -2790,30 +2832,16 @@ void RadarApp::exitSetupPortal()
     if (returnToApp)
     {
         DebugLog::println("Returning from local AP setup to app state.");
-        if (config_.appMode == AppMode::RealRadar)
+        if (config_.appMode == AppMode::RealRadar ||
+            config_.appMode == AppMode::ApiTest)
         {
-            if (connectToConfiguredWiFi())
+            if (hasConfiguredWiFi())
             {
-                beginStaSettingsServer();
-                beginRealRadar();
+                enterBootWiFiConnectState();
             }
             else
             {
-                enterWiFiReconnectMode("AP setup exited");
-            }
-            return;
-        }
-
-        if (config_.appMode == AppMode::ApiTest)
-        {
-            if (connectToConfiguredWiFi())
-            {
-                beginStaSettingsServer();
-                beginApiTest();
-            }
-            else
-            {
-                enterWiFiReconnectMode("AP setup exited");
+                beginConfiguredMode();
             }
             return;
         }
@@ -2878,40 +2906,6 @@ void RadarApp::setDeviceState(DeviceState state, const char *reason)
 bool RadarApp::hasConfiguredWiFi() const
 {
     return settings_.wifi.ssid[0] != '\0';
-}
-
-bool RadarApp::connectToConfiguredWiFi()
-{
-    if (!hasConfiguredWiFi())
-    {
-        DebugLog::println("WiFi is not configured in UserSettings.");
-        return false;
-    }
-
-    setDeviceState(DeviceState::ConnectWiFi);
-    startWifiManagerFromSettings();
-
-    const uint32_t startMs = millis();
-    while (!wifi_.isConnected() && millis() - startMs < 12000)
-    {
-        wifi_.update(millis(), config_.wifiReconnectIntervalMs);
-        delay(100);
-    }
-
-    if (!wifi_.isConnected())
-    {
-        setDeviceState(DeviceState::WiFiLost);
-        DebugLog::printf("[WiFi] Initial connect failed, entering reconnecting state. status=%s ssid_len=%u password_set=%u\r\n",
-                         wifi_.statusText(),
-                         static_cast<unsigned int>(strlen(settings_.wifi.ssid)),
-                         settings_.wifi.password[0] != '\0' ? 1 : 0);
-        return false;
-    }
-
-    DebugLog::printf("Configured WiFi connected. IP=%s RSSI=%d\r\n",
-                     WiFi.localIP().toString().c_str(),
-                     WiFi.RSSI());
-    return true;
 }
 
 void RadarApp::enterWiFiReconnectMode(const char *reason)

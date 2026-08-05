@@ -110,6 +110,7 @@ bool OpenSkyProvider::performStatesRequest(const String &url, const char *bearer
     client.setInsecure();
 
     HTTPClient https;
+    https.setTimeout(8000);
     if (!https.begin(client, url))
     {
         setError("HTTPS begin failed");
